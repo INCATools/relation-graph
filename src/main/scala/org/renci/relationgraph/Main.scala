@@ -7,6 +7,9 @@ import java.security.MessageDigest
 import java.util.Base64
 
 import caseapp._
+import monix.eval.Task
+import monix.execution.Scheduler.Implicits.global
+import monix.reactive._
 import org.apache.jena.graph.{Node, NodeFactory, Triple}
 import org.apache.jena.riot.RDFFormat
 import org.apache.jena.riot.system.{StreamRDF, StreamRDFWriter}
@@ -19,7 +22,7 @@ import org.semanticweb.owlapi.model._
 import org.semanticweb.owlapi.model.parameters.Imports
 import zio._
 import zio.blocking._
-import zio.stream._
+import zio.interop.monix._
 
 import scala.jdk.CollectionConverters._
 
@@ -60,17 +63,14 @@ object Main extends ZCaseApp[Config] {
             .when(config.mode == OWLMode)
           start <- ZIO.effectTotal(System.currentTimeMillis())
           restrictions = extractAllRestrictions(ontology, specifiedProperties)
-          processed = restrictions.mapMParUnordered(JRuntime.getRuntime.availableProcessors)(r =>
-            ZIO.effectTotal(processRestriction(r, whelk, config.mode)))
-          _ <- processed.foreach {
+          processed =
+            restrictions.mapParallelUnordered(JRuntime.getRuntime.availableProcessors)(r => Task(processRestriction(r, whelk, config.mode)))
+          monixTask = processed.foreachL {
             case (nonredundant, redundant) =>
-              ZIO.effect {
-                nonredundant.foreach(nonredundantRDFWriter.triple)
-                redundant.foreach(redundantRDFWriter.triple)
-              }
-//              effectBlockingIO(nonredundant.foreach(nonredundantRDFWriter.triple)) &>
-//                effectBlockingIO(redundant.foreach(redundantRDFWriter.triple))
+              nonredundant.foreach(nonredundantRDFWriter.triple)
+              redundant.foreach(redundantRDFWriter.triple)
           }
+          _ <- IO.fromTask(monixTask)
           stop <- ZIO.effectTotal(System.currentTimeMillis())
           _ <- ZIO.effectTotal(scribe.info(s"Computed relations in ${(stop - start) / 1000.0}s"))
         } yield ()
@@ -87,13 +87,13 @@ object Main extends ZCaseApp[Config] {
       }
     }(stream => ZIO.effectTotal(stream.finish()))
 
-  def extractAllRestrictions(ont: OWLOntology, specifiedProperties: Set[OWLObjectProperty]): ZStream[Any, Nothing, Restriction] = {
+  def extractAllRestrictions(ont: OWLOntology, specifiedProperties: Set[OWLObjectProperty]): Observable[Restriction] = {
     val properties =
       if (specifiedProperties.nonEmpty) specifiedProperties
       else ont.getObjectPropertiesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLTopObjectProperty
     val classes = ont.getClassesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLThing - OWLNothing
-    val propertiesStream = Stream.fromIterable(properties)
-    val classesStream = Stream.fromIterable(classes)
+    val propertiesStream = Observable.fromIterable(properties)
+    val classesStream = Observable.fromIterable(classes)
     for {
       property <- propertiesStream
       cls <- classesStream
