@@ -7,7 +7,8 @@ final case class Config(ontologyFile: String,
                         nonRedundantOutputFile: String,
                         redundantOutputFile: String,
                         mode: Config.OutputMode = Config.RDFMode,
-                        properties: List[String] = Nil)
+                        property: List[String] = Nil,
+                        propertiesFile: Option[String])
 
 object Config {
 
@@ -23,7 +24,7 @@ object Config {
       arg.toLowerCase match {
         case "rdf" => Right(RDFMode)
         case "owl" => Right(OWLMode)
-        case _     => Left(MalformedValue("output mode", arg))
+        case _ => Left(MalformedValue("output mode", arg))
       }
     }
 
