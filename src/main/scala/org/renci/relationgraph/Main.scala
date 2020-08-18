@@ -24,6 +24,7 @@ import zio._
 import zio.blocking._
 import zio.interop.monix._
 
+import scala.io.Source
 import scala.jdk.CollectionConverters._
 
 object Main extends ZCaseApp[Config] {
@@ -41,7 +42,6 @@ object Main extends ZCaseApp[Config] {
     val ontologyFile = new File(config.ontologyFile)
     val nonRedundantOutputFile = new File(config.nonRedundantOutputFile)
     val redundantOutputFile = new File(config.redundantOutputFile)
-    val specifiedProperties = config.property.map(prop => df.getOWLObjectProperty(IRI.create(prop))).to(Set)
     val streamsManaged = for {
       nonredundantOutputStream <- Managed.fromAutoCloseable(ZIO.effect(new FileOutputStream(nonRedundantOutputFile)))
       redundantOutputStream <- Managed.fromAutoCloseable(ZIO.effect(new FileOutputStream(redundantOutputFile)))
@@ -51,6 +51,8 @@ object Main extends ZCaseApp[Config] {
     val program = streamsManaged.use {
       case (nonredundantRDFWriter, redundantRDFWriter) =>
         for {
+          fileProperties <- config.propertiesFile.map(readPropertiesFile).getOrElse(ZIO.succeed(Set.empty[OWLObjectProperty]))
+          specifiedProperties = fileProperties ++ config.property.map(prop => df.getOWLObjectProperty(IRI.create(prop))).to(Set)
           manager <- ZIO.effect(OWLManager.createOWLOntologyManager())
           ontology <- ZIO.effect(manager.loadOntologyFromOntologyDocument(ontologyFile))
           whelkOntology = Bridge.ontologyToAxioms(ontology)
@@ -77,6 +79,11 @@ object Main extends ZCaseApp[Config] {
     }
     program.exitCode
   }
+
+  def readPropertiesFile(file: String): ZIO[Blocking, Throwable, Set[OWLObjectProperty]] =
+    effectBlocking(Source.fromFile(file, "utf-8")).bracketAuto { source =>
+      effectBlocking(source.getLines().map(_.trim).filter(_.nonEmpty).map(line => df.getOWLObjectProperty(IRI.create(line))).to(Set))
+    }
 
   def createStreamRDF(output: OutputStream): Managed[Throwable, StreamRDF] =
     Managed.make {

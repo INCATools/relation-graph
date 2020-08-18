@@ -7,7 +7,8 @@ final case class Config(ontologyFile: String,
                         nonRedundantOutputFile: String,
                         redundantOutputFile: String,
                         mode: Config.OutputMode = Config.RDFMode,
-                        property: List[String] = Nil)
+                        property: List[String] = Nil,
+                        propertiesFile: Option[String])
 
 object Config {
 
