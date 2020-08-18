@@ -41,7 +41,7 @@ object Main extends ZCaseApp[Config] {
     val ontologyFile = new File(config.ontologyFile)
     val nonRedundantOutputFile = new File(config.nonRedundantOutputFile)
     val redundantOutputFile = new File(config.redundantOutputFile)
-    val specifiedProperties = config.properties.map(prop => df.getOWLObjectProperty(IRI.create(prop))).to(Set)
+    val specifiedProperties = config.property.map(prop => df.getOWLObjectProperty(IRI.create(prop))).to(Set)
     val streamsManaged = for {
       nonredundantOutputStream <- Managed.fromAutoCloseable(ZIO.effect(new FileOutputStream(nonRedundantOutputFile)))
       redundantOutputStream <- Managed.fromAutoCloseable(ZIO.effect(new FileOutputStream(redundantOutputFile)))
