@@ -1,4 +1,4 @@
-[![Build Status](https://secure.travis-ci.com/balhoff/relation-graph.png)](http://travis-ci.com/balhoff/relation-graph)
+[![Build Status](https://travis-ci.com/balhoff/relation-graph.svg?branch=master)](https://travis-ci.com/balhoff/relation-graph)
 
 # relation-graph
 
