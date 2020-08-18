@@ -1,3 +1,5 @@
+[![Build Status](https://secure.travis-ci.com/balhoff/relation-graph.png)](http://travis-ci.com/balhoff/relation-graph)
+
 # relation-graph
 
 Materialize OWL existential relations
