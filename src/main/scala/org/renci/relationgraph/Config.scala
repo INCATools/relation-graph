@@ -23,7 +23,7 @@ object Config {
       arg.toLowerCase match {
         case "rdf" => Right(RDFMode)
         case "owl" => Right(OWLMode)
-        case _     => Left(MalformedValue("output mode", arg))
+        case _ => Left(MalformedValue("output mode", arg))
       }
     }
 

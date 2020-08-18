@@ -14,7 +14,22 @@ Declaration(Class(:C))
 Declaration(Class(:D))
 Declaration(Class(:E))
 Declaration(Class(:F))
+Declaration(Class(:T))
+Declaration(Class(:U))
+Declaration(Class(:V))
+Declaration(Class(:X))
+Declaration(Class(:Y))
+Declaration(Class(:Z))
 Declaration(ObjectProperty(:p))
+Declaration(ObjectProperty(:q))
+############################
+#   Object Properties
+############################
+
+# Object Property: :q (:q)
+
+TransitiveObjectProperty(:q)
+
 
 ############################
 #   Classes
@@ -39,6 +54,26 @@ SubClassOf(:E ObjectSomeValuesFrom(:p :C))
 # Class: :F (:F)
 
 EquivalentClasses(:F ObjectSomeValuesFrom(:p :B))
+
+# Class: :T (:T)
+
+SubClassOf(:T ObjectSomeValuesFrom(:q :X))
+
+# Class: :U (:U)
+
+SubClassOf(:U :T)
+
+# Class: :V (:V)
+
+SubClassOf(:V :U)
+
+# Class: :X (:X)
+
+SubClassOf(:X ObjectSomeValuesFrom(:q :Y))
+
+# Class: :Y (:Y)
+
+SubClassOf(:Y ObjectSomeValuesFrom(:q :Z))
 
 
 )

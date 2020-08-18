@@ -13,6 +13,7 @@ object TestRelationGraph extends DefaultRunnableSpec {
 
   private val Prefix = "http://example.org/test"
   private val P = NodeFactory.createURI(s"$Prefix#p")
+  private val Q = NodeFactory.createURI(s"$Prefix#q")
 
   private def n: String => Node = NodeFactory.createURI
 
@@ -42,7 +43,11 @@ object TestRelationGraph extends DefaultRunnableSpec {
           assert(nonredundant)(contains(Triple.create(n(s"$Prefix#E"), P, n(s"$Prefix#C")))) &&
           assert(redundant)(contains(Triple.create(n(s"$Prefix#E"), P, n(s"$Prefix#C")))) &&
           assert(nonredundant)(not(contains(Triple.create(n(s"$Prefix#E"), P, n(s"$Prefix#A"))))) &&
-          assert(redundant)(contains(Triple.create(n(s"$Prefix#E"), P, n(s"$Prefix#A"))))
+          assert(redundant)(contains(Triple.create(n(s"$Prefix#E"), P, n(s"$Prefix#A")))) &&
+          assert(redundant)(contains(Triple.create(n(s"$Prefix#T"), Q, n(s"$Prefix#Z")))) &&
+          assert(nonredundant)(not(contains(Triple.create(n(s"$Prefix#T"), Q, n(s"$Prefix#Z"))))) &&
+          assert(redundant)(contains(Triple.create(n(s"$Prefix#V"), Q, n(s"$Prefix#Z")))) &&
+          assert(nonredundant)(not(contains(Triple.create(n(s"$Prefix#V"), Q, n(s"$Prefix#Z")))))
       }
     }
 

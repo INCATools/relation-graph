@@ -91,22 +91,25 @@ object Main extends ZCaseApp[Config] {
     val properties =
       if (specifiedProperties.nonEmpty) specifiedProperties
       else ont.getObjectPropertiesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLTopObjectProperty
+    val transitiveProperties =
+      ont.getAxioms(AxiomType.TRANSITIVE_OBJECT_PROPERTY, Imports.INCLUDED).asScala.to(Set).map(_.getProperty).collect {
+        case p: OWLObjectProperty => p
+      }
     val classes = ont.getClassesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLThing - OWLNothing
     val propertiesStream = Observable.fromIterable(properties)
     val classesStream = Observable.fromIterable(classes)
     for {
       property <- propertiesStream
       cls <- classesStream
-    } yield Restriction(property, cls)
+    } yield Restriction(property, cls, transitiveProperties(property))
   }
 
   def processRestriction(combo: Restriction, whelk: ReasonerState, mode: Config.OutputMode): (Set[Triple], Set[Triple]) = {
-    val Restriction(property, cls) = combo
+    val Restriction(property, cls, isTransitive) = combo
     val propertyID = property.getIRI.toString
     val clsID = cls.getIRI.toString
-    val queryConcept = AtomicConcept(s"$propertyID$clsID")
-    val restriction = ExistentialRestriction(Role(propertyID), AtomicConcept(clsID))
-    val axioms = Set(ConceptInclusion(queryConcept, restriction), ConceptInclusion(restriction, queryConcept))
+    val role = Role(propertyID)
+    val (queryConcept, axioms) = createQueryConcept(role, AtomicConcept(clsID))
     val updatedWhelk = Reasoner.assert(axioms, whelk)
     val predicate = NodeFactory.createURI(property.getIRI.toString)
     val target = NodeFactory.createURI(cls.getIRI.toString)
@@ -114,7 +117,13 @@ object Main extends ZCaseApp[Config] {
     val subclasses =
       updatedWhelk.closureSubsBySuperclass(queryConcept).collect { case x: AtomicConcept => x } - queryConcept - BuiltIn.Bottom
     if (!equivalents(BuiltIn.Bottom)) {
-      val nonredundantTerms = directSubclasses - BuiltIn.Bottom ++ equivalents
+      val directSubs = if (isTransitive) {
+        val (subQueryConcepts, subQueryAxioms) = directSubclasses.map(c => createQueryConcept(role, c)).unzip
+        val subWhelk = Reasoner.assert(subQueryAxioms.flatten, updatedWhelk)
+        val (_, newDirectSubclasses) = subWhelk.directlySubsumes(queryConcept)
+        newDirectSubclasses -- subQueryConcepts
+      } else directSubclasses
+      val nonredundantTerms = directSubs - BuiltIn.Bottom ++ equivalents
       val nonredundantTriples = mode match {
         case RDFMode => nonredundantTerms.map(sc => Triple.create(NodeFactory.createURI(sc.id), predicate, target))
         case OWLMode => nonredundantTerms.flatMap(sc => owlTriples(NodeFactory.createURI(sc.id), predicate, target))
@@ -125,6 +134,13 @@ object Main extends ZCaseApp[Config] {
       }
       (nonredundantTriples, redundantTriples)
     } else (Set.empty[Triple], Set.empty[Triple])
+  }
+
+  def createQueryConcept(role: Role, concept: AtomicConcept): (AtomicConcept, Set[ConceptInclusion]) = {
+    val queryConcept = AtomicConcept(s"${role.id}${concept.id}")
+    val restriction = ExistentialRestriction(role, concept)
+    val axioms = Set(ConceptInclusion(queryConcept, restriction), ConceptInclusion(restriction, queryConcept))
+    (queryConcept, axioms)
   }
 
   def owlTriples(subj: Node, pred: Node, obj: Node): Set[Triple] = {
@@ -139,6 +155,6 @@ object Main extends ZCaseApp[Config] {
     )
   }
 
-  final case class Restriction(property: OWLObjectProperty, filler: OWLClass)
+  final case class Restriction(property: OWLObjectProperty, filler: OWLClass, transitive: Boolean)
 
 }
