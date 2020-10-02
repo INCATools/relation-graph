@@ -31,6 +31,7 @@ object Main extends ZCaseApp[Config] {
 
   private val RDFType = RDF.`type`.asNode
   private val RDFSSubClassOf = RDFS.subClassOf.asNode
+  private val OWLEquivalentClass = OWL2.equivalentClass.asNode
   private val OWLRestriction = OWL2.Restriction.asNode
   private val OWLOnProperty = OWL2.onProperty.asNode
   private val OWLSomeValuesFrom = OWL2.someValuesFrom.asNode
@@ -60,15 +61,18 @@ object Main extends ZCaseApp[Config] {
           whelk = Reasoner.assert(whelkOntology)
           _ <- ZIO.effectTotal(scribe.info("Done running reasoner"))
           _ <- (effectBlockingIO(
-              nonredundantRDFWriter.triple(Triple.create(NodeFactory.createBlankNode("nonredundant"), RDFType, OWLOntology))) *>
-              effectBlockingIO(redundantRDFWriter.triple(Triple.create(NodeFactory.createBlankNode("redundant"), RDFType, OWLOntology))))
+            nonredundantRDFWriter.triple(Triple.create(NodeFactory.createBlankNode("nonredundant"), RDFType, OWLOntology))) *>
+            effectBlockingIO(redundantRDFWriter.triple(Triple.create(NodeFactory.createBlankNode("redundant"), RDFType, OWLOntology))))
             .when(config.mode == OWLMode)
           start <- ZIO.effectTotal(System.currentTimeMillis())
+          classes = allClasses(ontology)
+          classesTasks = classes.map(c => Task(processSuperclasses(c, whelk, config)))
           restrictions = extractAllRestrictions(ontology, specifiedProperties)
-          processed =
-            restrictions.mapParallelUnordered(JRuntime.getRuntime.availableProcessors)(r => Task(processRestriction(r, whelk, config.mode)))
+          restrictionsTasks = restrictions.map(r => Task(processRestriction(r, whelk, config.mode)))
+          allTasks = classesTasks ++ restrictionsTasks
+          processed = allTasks.mapParallelUnordered(JRuntime.getRuntime.availableProcessors)(identity)
           monixTask = processed.foreachL {
-            case (nonredundant, redundant) =>
+            case TriplesGroup(nonredundant, redundant) =>
               nonredundant.foreach(nonredundantRDFWriter.triple)
               redundant.foreach(redundantRDFWriter.triple)
           }
@@ -94,20 +98,48 @@ object Main extends ZCaseApp[Config] {
       }
     }(stream => ZIO.effectTotal(stream.finish()))
 
+  def allClasses(ont: OWLOntology): Observable[OWLClass] = Observable.fromIterable(ont.getClassesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLThing - OWLNothing)
+
+  def processSuperclasses(cls: OWLClass, whelk: ReasonerState, config: Config): TriplesGroup = {
+    val subject = NodeFactory.createURI(cls.getIRI.toString)
+    val concept = AtomicConcept(cls.getIRI.toString)
+    val allSuperclasses = (whelk.closureSubsBySubclass.getOrElse(concept, Set.empty) - BuiltIn.Top)
+      .collect { case ac @ AtomicConcept(_) => ac }
+    if (allSuperclasses(BuiltIn.Bottom)) TriplesGroup.empty //unsatisfiable
+    else {
+      val (equivs, directSuperclasses) = whelk.directlySubsumedBy(concept)
+      val adjustedEquivs = if (config.reflexiveSubclasses.bool) equivs + concept else equivs - concept
+      val directSuperclassTriples = directSuperclasses.map(c => Triple.create(subject, RDFSSubClassOf, NodeFactory.createURI(c.id)))
+      val equivalentClassTriples = if (config.equivalenceAsSubclass.bool)
+        adjustedEquivs.map(c => Triple.create(subject, RDFSSubClassOf, NodeFactory.createURI(c.id)))
+      else
+        adjustedEquivs.map(c => Triple.create(subject, OWLEquivalentClass, NodeFactory.createURI(c.id)))
+      val nonredundantTriples = directSuperclassTriples ++ equivalentClassTriples
+      val adjustedSuperclasses = if (config.reflexiveSubclasses.bool) allSuperclasses + concept else allSuperclasses - concept
+      val redundantTriples = if (config.equivalenceAsSubclass.bool)
+        adjustedSuperclasses.map(c => Triple.create(subject, RDFSSubClassOf, NodeFactory.createURI(c.id)))
+      else {
+        val superclassesMinusEquiv = adjustedSuperclasses -- adjustedEquivs
+        superclassesMinusEquiv.map(c => Triple.create(subject, RDFSSubClassOf, NodeFactory.createURI(c.id))) ++
+          equivalentClassTriples
+      }
+      TriplesGroup(nonredundantTriples, redundantTriples)
+    }
+  }
+
   def extractAllRestrictions(ont: OWLOntology, specifiedProperties: Set[OWLObjectProperty]): Observable[Restriction] = {
     val properties =
       if (specifiedProperties.nonEmpty) specifiedProperties
       else ont.getObjectPropertiesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLTopObjectProperty
-    val classes = ont.getClassesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLThing - OWLNothing
     val propertiesStream = Observable.fromIterable(properties)
-    val classesStream = Observable.fromIterable(classes)
+    val classesStream = allClasses(ont)
     for {
       property <- propertiesStream
       cls <- classesStream
     } yield Restriction(property, cls)
   }
 
-  def processRestriction(combo: Restriction, whelk: ReasonerState, mode: Config.OutputMode): (Set[Triple], Set[Triple]) = {
+  def processRestriction(combo: Restriction, whelk: ReasonerState, mode: Config.OutputMode): TriplesGroup = {
     val Restriction(property, cls) = combo
     val propertyID = property.getIRI.toString
     val clsID = cls.getIRI.toString
@@ -130,8 +162,8 @@ object Main extends ZCaseApp[Config] {
         case RDFMode => subclasses.map(sc => Triple.create(NodeFactory.createURI(sc.id), predicate, target))
         case OWLMode => subclasses.flatMap(sc => owlTriples(NodeFactory.createURI(sc.id), predicate, target))
       }
-      (nonredundantTriples, redundantTriples)
-    } else (Set.empty[Triple], Set.empty[Triple])
+      TriplesGroup(nonredundantTriples, redundantTriples)
+    } else TriplesGroup.empty
   }
 
   def owlTriples(subj: Node, pred: Node, obj: Node): Set[Triple] = {
@@ -147,5 +179,13 @@ object Main extends ZCaseApp[Config] {
   }
 
   final case class Restriction(property: OWLObjectProperty, filler: OWLClass)
+
+  final case class TriplesGroup(nonredundant: Set[Triple], redundant: Set[Triple])
+
+  object TriplesGroup {
+
+    val empty: TriplesGroup = TriplesGroup(Set.empty, Set.empty)
+
+  }
 
 }

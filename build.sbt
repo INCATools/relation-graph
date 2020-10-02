@@ -24,9 +24,9 @@ libraryDependencies ++= {
     "dev.zio"                    %% "zio-streams"       % zioVersion,
     "dev.zio"                    %% "zio-interop-monix" % "3.2.2.0-RC2",
     "io.monix"                   %% "monix"             % "3.2.2",
-    "org.geneontology"           %% "whelk-owlapi"      % "1.0.2",
+    "org.geneontology"           %% "whelk-owlapi"      % "1.0.3",
     "com.outr"                   %% "scribe-slf4j"      % "2.7.12",
-    "com.github.alexarchambault" %% "case-app"          % "2.0.3",
+    "com.github.alexarchambault" %% "case-app"          % "2.0.4",
     "org.apache.jena"             % "apache-jena-libs"  % "3.16.0" exclude ("org.slf4j", "slf4j-log4j12"),
     "dev.zio"                    %% "zio-test"          % zioVersion % Test,
     "dev.zio"                    %% "zio-test-sbt"      % zioVersion % Test
