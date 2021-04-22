@@ -49,37 +49,35 @@ object Main extends ZCaseApp[Config] {
       nonredundantRDFWriter <- createStreamRDF(nonredundantOutputStream)
       redundantRDFWriter <- createStreamRDF(redundantOutputStream)
     } yield (nonredundantRDFWriter, redundantRDFWriter)
-    val program = streamsManaged.use {
-      case (nonredundantRDFWriter, redundantRDFWriter) =>
-        for {
-          fileProperties <- config.propertiesFile.map(readPropertiesFile).getOrElse(ZIO.succeed(Set.empty[OWLObjectProperty]))
-          specifiedProperties = fileProperties ++ config.property.map(prop => df.getOWLObjectProperty(IRI.create(prop))).to(Set)
-          manager <- ZIO.effect(OWLManager.createOWLOntologyManager())
-          ontology <- ZIO.effect(manager.loadOntologyFromOntologyDocument(ontologyFile))
-          whelkOntology = Bridge.ontologyToAxioms(ontology)
-          _ <- ZIO.effectTotal(scribe.info("Running reasoner"))
-          whelk = Reasoner.assert(whelkOntology)
-          _ <- ZIO.effectTotal(scribe.info("Done running reasoner"))
-          _ <- (effectBlockingIO(
-            nonredundantRDFWriter.triple(Triple.create(NodeFactory.createBlankNode("nonredundant"), RDFType, OWLOntology))) *>
-            effectBlockingIO(redundantRDFWriter.triple(Triple.create(NodeFactory.createBlankNode("redundant"), RDFType, OWLOntology))))
-            .when(config.mode == OWLMode)
-          start <- ZIO.effectTotal(System.currentTimeMillis())
-          classes = allClasses(ontology)
-          classesTasks = classes.map(c => Task(processSuperclasses(c, whelk, config)))
-          restrictions = extractAllRestrictions(ontology, specifiedProperties)
-          restrictionsTasks = restrictions.map(r => Task(processRestriction(r, whelk, config.mode)))
-          allTasks = classesTasks ++ restrictionsTasks
-          processed = allTasks.mapParallelUnordered(JRuntime.getRuntime.availableProcessors)(identity)
-          monixTask = processed.foreachL {
-            case TriplesGroup(nonredundant, redundant) =>
-              nonredundant.foreach(nonredundantRDFWriter.triple)
-              redundant.foreach(redundantRDFWriter.triple)
-          }
-          _ <- IO.fromTask(monixTask)
-          stop <- ZIO.effectTotal(System.currentTimeMillis())
-          _ <- ZIO.effectTotal(scribe.info(s"Computed relations in ${(stop - start) / 1000.0}s"))
-        } yield ()
+    val program = streamsManaged.use { case (nonredundantRDFWriter, redundantRDFWriter) =>
+      for {
+        fileProperties <- config.propertiesFile.map(readPropertiesFile).getOrElse(ZIO.succeed(Set.empty[OWLObjectProperty]))
+        specifiedProperties = fileProperties ++ config.property.map(prop => df.getOWLObjectProperty(IRI.create(prop))).to(Set)
+        manager <- ZIO.effect(OWLManager.createOWLOntologyManager())
+        ontology <- ZIO.effect(manager.loadOntologyFromOntologyDocument(ontologyFile))
+        whelkOntology = Bridge.ontologyToAxioms(ontology)
+        _ <- ZIO.effectTotal(scribe.info("Running reasoner"))
+        whelk = Reasoner.assert(whelkOntology)
+        _ <- ZIO.effectTotal(scribe.info("Done running reasoner"))
+        _ <- (effectBlockingIO(
+          nonredundantRDFWriter.triple(Triple.create(NodeFactory.createBlankNode("nonredundant"), RDFType, OWLOntology))) *>
+          effectBlockingIO(redundantRDFWriter.triple(Triple.create(NodeFactory.createBlankNode("redundant"), RDFType, OWLOntology))))
+          .when(config.mode == OWLMode)
+        start <- ZIO.effectTotal(System.currentTimeMillis())
+        classes = allClasses(ontology)
+        classesTasks = classes.map(c => Task(processSuperclasses(c, whelk, config)))
+        restrictions = extractAllRestrictions(ontology, specifiedProperties)
+        restrictionsTasks = restrictions.map(r => Task(processRestriction(r, whelk, config.mode)))
+        allTasks = classesTasks ++ restrictionsTasks
+        processed = allTasks.mapParallelUnordered(JRuntime.getRuntime.availableProcessors)(identity)
+        monixTask = processed.foreachL { case TriplesGroup(nonredundant, redundant) =>
+          nonredundant.foreach(nonredundantRDFWriter.triple)
+          redundant.foreach(redundantRDFWriter.triple)
+        }
+        _ <- IO.fromTask(monixTask)
+        stop <- ZIO.effectTotal(System.currentTimeMillis())
+        _ <- ZIO.effectTotal(scribe.info(s"Computed relations in ${(stop - start) / 1000.0}s"))
+      } yield ()
     }
     program.exitCode
   }
@@ -98,7 +96,8 @@ object Main extends ZCaseApp[Config] {
       }
     }(stream => ZIO.effectTotal(stream.finish()))
 
-  def allClasses(ont: OWLOntology): Observable[OWLClass] = Observable.fromIterable(ont.getClassesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLThing - OWLNothing)
+  def allClasses(ont: OWLOntology): Observable[OWLClass] =
+    Observable.fromIterable(ont.getClassesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLThing - OWLNothing)
 
   def processSuperclasses(cls: OWLClass, whelk: ReasonerState, config: Config): TriplesGroup = {
     val subject = NodeFactory.createURI(cls.getIRI.toString)
@@ -110,19 +109,21 @@ object Main extends ZCaseApp[Config] {
       val (equivs, directSuperclasses) = whelk.directlySubsumedBy(concept)
       val adjustedEquivs = if (config.reflexiveSubclasses.bool) equivs + concept else equivs - concept
       val directSuperclassTriples = directSuperclasses.map(c => Triple.create(subject, RDFSSubClassOf, NodeFactory.createURI(c.id)))
-      val equivalentClassTriples = if (config.equivalenceAsSubclass.bool)
-        adjustedEquivs.map(c => Triple.create(subject, RDFSSubClassOf, NodeFactory.createURI(c.id)))
-      else
-        adjustedEquivs.map(c => Triple.create(subject, OWLEquivalentClass, NodeFactory.createURI(c.id)))
+      val equivalentClassTriples =
+        if (config.equivalenceAsSubclass.bool)
+          adjustedEquivs.map(c => Triple.create(subject, RDFSSubClassOf, NodeFactory.createURI(c.id)))
+        else
+          adjustedEquivs.map(c => Triple.create(subject, OWLEquivalentClass, NodeFactory.createURI(c.id)))
       val nonredundantTriples = directSuperclassTriples ++ equivalentClassTriples
       val adjustedSuperclasses = if (config.reflexiveSubclasses.bool) allSuperclasses + concept else allSuperclasses - concept
-      val redundantTriples = if (config.equivalenceAsSubclass.bool)
-        adjustedSuperclasses.map(c => Triple.create(subject, RDFSSubClassOf, NodeFactory.createURI(c.id)))
-      else {
-        val superclassesMinusEquiv = adjustedSuperclasses -- adjustedEquivs
-        superclassesMinusEquiv.map(c => Triple.create(subject, RDFSSubClassOf, NodeFactory.createURI(c.id))) ++
-          equivalentClassTriples
-      }
+      val redundantTriples =
+        if (config.equivalenceAsSubclass.bool)
+          adjustedSuperclasses.map(c => Triple.create(subject, RDFSSubClassOf, NodeFactory.createURI(c.id)))
+        else {
+          val superclassesMinusEquiv = adjustedSuperclasses -- adjustedEquivs
+          superclassesMinusEquiv.map(c => Triple.create(subject, RDFSSubClassOf, NodeFactory.createURI(c.id))) ++
+            equivalentClassTriples
+        }
       TriplesGroup(nonredundantTriples, redundantTriples)
     }
   }
