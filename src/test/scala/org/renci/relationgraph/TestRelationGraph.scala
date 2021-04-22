@@ -30,8 +30,7 @@ object TestRelationGraph extends DefaultRunnableSpec {
             restrictions
               .map(Main.processRestriction(_, whelk, Config.RDFMode))
               .reduce((left, right) => TriplesGroup(left.nonredundant ++ right.nonredundant, left.redundant ++ right.redundant))
-              .headL
-          )
+              .headL)
           TriplesGroup(nonredundant, redundant) = triples
         } yield assert(nonredundant)(contains(Triple.create(n(s"$Prefix#A"), P, n(s"$Prefix#D")))) &&
           assert(redundant)(contains(Triple.create(n(s"$Prefix#A"), P, n(s"$Prefix#D")))) &&
