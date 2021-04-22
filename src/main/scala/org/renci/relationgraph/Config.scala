@@ -12,9 +12,7 @@ final case class Config(ontologyFile: String,
                         propertiesFile: Option[String],
                         outputSubclasses: BoolValue = FalseValue,
                         reflexiveSubclasses: BoolValue = TrueValue,
-                        equivalenceAsSubclass: BoolValue = TrueValue) {
-
-}
+                        equivalenceAsSubclass: BoolValue = TrueValue) {}
 
 object Config {
 
@@ -30,15 +28,14 @@ object Config {
       arg.toLowerCase match {
         case "rdf" => Right(RDFMode)
         case "owl" => Right(OWLMode)
-        case _     => Left(MalformedValue("output mode", arg))
+        case _ => Left(MalformedValue("output mode", arg))
       }
     }
 
   }
 
-  /**
-   * This works around some confusing behavior in case-app boolean parsing
-   */
+  /** This works around some confusing behavior in case-app boolean parsing
+    */
   sealed trait BoolValue {
 
     def bool: Boolean
@@ -59,11 +56,11 @@ object Config {
 
   implicit val argParser: ArgParser[BoolValue] = SimpleArgParser.from[BoolValue]("boolean value") { arg =>
     arg.toLowerCase match {
-      case "true"  => Right(TrueValue)
+      case "true" => Right(TrueValue)
       case "false" => Right(FalseValue)
-      case "1"     => Right(TrueValue)
-      case "0"     => Right(FalseValue)
-      case _       => Left(MalformedValue("boolean value", arg))
+      case "1" => Right(TrueValue)
+      case "0" => Right(FalseValue)
+      case _ => Left(MalformedValue("boolean value", arg))
     }
   }
 
