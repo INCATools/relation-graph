@@ -25,7 +25,7 @@ libraryDependencies ++= {
     "dev.zio"                    %% "zio-interop-monix" % "3.2.2.0-RC2",
     "io.monix"                   %% "monix"             % "3.2.2",
     "org.geneontology"           %% "whelk-owlapi"      % "1.1",
-    "com.outr"                   %% "scribe-slf4j"      % "2.8.6",
+    "com.outr"                   %% "scribe-slf4j"      % "3.5.3",
     "com.github.alexarchambault" %% "case-app"          % "2.0.6",
     "org.apache.jena"             % "apache-jena-libs"  % "3.17.0" exclude ("org.slf4j", "slf4j-log4j12"),
     "dev.zio"                    %% "zio-test"          % zioVersion % Test,
