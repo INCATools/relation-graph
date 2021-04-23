@@ -66,10 +66,12 @@ object Main extends ZCaseApp[Config] {
           classesStream = allClasses(ontology)
           classesTasks = classesStream.map(c => ZIO.effectTotal(processSuperclasses(c, whelk, config)))
           queue <- Queue.unbounded[Restriction]
-          _ <- traverse(properties, classes, whelk, config.mode, queue)
-          restrictionsStream = Stream.fromQueue(queue).map(r => processRestrictionAndExtendQueue(r, classes, whelk, config.mode, queue))
+          activeRestrictions <- SubscriptionRef.make(Set.empty[Restriction])
+          _ <- traverse(properties, classes, whelk, config.mode, queue, activeRestrictions.ref)
+          restrictionsStream = Stream.fromQueue(queue).map(r => processRestrictionAndExtendQueue(r, classes, whelk, config.mode, queue, activeRestrictions.ref))
           allTasks = classesTasks ++ restrictionsStream
           processed = allTasks.mapMParUnordered(JRuntime.getRuntime.availableProcessors)(identity)
+          watchFiber <- activeRestrictions.changes.dropUntil(_.isEmpty).take(1).foreach(_ => queue.shutdown).fork
           _ <- processed.foreach {
             case TriplesGroup(nonredundant, redundant) =>
               ZIO.effect {
@@ -77,6 +79,7 @@ object Main extends ZCaseApp[Config] {
                 redundant.foreach(redundantRDFWriter.triple)
               }
           }
+          _ <- watchFiber.join
           stop <- ZIO.effectTotal(System.currentTimeMillis())
           _ <- ZIO.effectTotal(scribe.info(s"Computed relations in ${(stop - start) / 1000.0}s"))
         } yield ()
@@ -100,16 +103,16 @@ object Main extends ZCaseApp[Config] {
 
   def allClasses(ont: OWLOntology): ZStream[Any, Nothing, OWLClass] = Stream.fromIterable(ont.getClassesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLThing - OWLNothing)
 
-  def traverse(properties: Hierarchy, classes: Hierarchy, reasoner: ReasonerState, mode: Config.OutputMode, queue: Queue[Restriction]): UIO[Unit] =
+  def traverse(properties: Hierarchy, classes: Hierarchy, reasoner: ReasonerState, mode: Config.OutputMode, queue: Queue[Restriction], activeRestrictions: RefM[Set[Restriction]]): UIO[Unit] =
     ZIO.foreach_(properties.subclasses.getOrElse(Top, Set.empty)) { subprop =>
-      traverseProperty(subprop, properties, classes, reasoner, mode, queue)
+      traverseProperty(subprop, properties, classes, reasoner, mode, queue, activeRestrictions)
     }
 
-  def traverseProperty(property: AtomicConcept, properties: Hierarchy, classes: Hierarchy, whelk: ReasonerState, mode: Config.OutputMode, queue: Queue[Restriction]): UIO[Unit] = {
+  def traverseProperty(property: AtomicConcept, properties: Hierarchy, classes: Hierarchy, whelk: ReasonerState, mode: Config.OutputMode, queue: Queue[Restriction], activeRestrictions: RefM[Set[Restriction]]): UIO[Unit] = {
     val restrictions = if (hasSubClasses(property, whelk)) {
       (classes.subclasses.getOrElse(Top, Set.empty) - Bottom).map(filler => Restriction(Role(property.id), filler))
     } else Set.empty
-    queue.offerAll(restrictions).unit
+    activeRestrictions.update(current => ZIO.succeed(current ++ restrictions)) *> queue.offerAll(restrictions).unit
   }
 
   def hasSubClasses(property: AtomicConcept, whelk: ReasonerState): Boolean = {
@@ -120,17 +123,18 @@ object Main extends ZCaseApp[Config] {
     (updatedWhelk.closureSubsBySuperclass.getOrElse(queryConcept, Set.empty) - Bottom).nonEmpty
   }
 
-  def processRestrictionAndExtendQueue(restriction: Restriction, classes: Hierarchy, whelk: ReasonerState, mode: Config.OutputMode, queue: Queue[Restriction]): UIO[TriplesGroup] = {
+  def processRestrictionAndExtendQueue(restriction: Restriction, classes: Hierarchy, whelk: ReasonerState, mode: Config.OutputMode, queue: Queue[Restriction], activeRestrictions: RefM[Set[Restriction]]): UIO[TriplesGroup] = {
     for {
       triples <- ZIO.effectTotal(processRestriction(restriction, whelk, mode))
-      directFillerSubclassesRestrictions = if (triples.redundant.nonEmpty) (classes.subclasses.getOrElse(restriction.filler, Set.empty) - Bottom).map(c => Restriction(restriction.property, c))
+      directFillerSubclassesRestrictions = if (triples.redundant.nonEmpty)
+        (classes.subclasses.getOrElse(restriction.filler, Set.empty) - Bottom).map(c => Restriction(restriction.property, c))
       else Set.empty
+      _ <- activeRestrictions.update(current => ZIO.succeed(current - restriction ++ directFillerSubclassesRestrictions))
       _ <- queue.offerAll(directFillerSubclassesRestrictions)
     } yield triples
   }
 
   def processRestriction(restriction: Restriction, whelk: ReasonerState, mode: Config.OutputMode): TriplesGroup = {
-    println(s"Querying: ${restriction.property.id} || ${restriction.filler.id}")
     val queryConcept = AtomicConcept(s"${restriction.property.id}${restriction.filler.id}")
     val er = ExistentialRestriction(restriction.property, restriction.filler)
     val axioms = Set(ConceptInclusion(queryConcept, er), ConceptInclusion(er, queryConcept))
