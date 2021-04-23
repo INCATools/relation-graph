@@ -5,15 +5,12 @@ import java.lang.{Runtime => JRuntime}
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.Base64
-
 import caseapp._
-import monix.eval.Task
-import monix.execution.Scheduler.Implicits.global
-import monix.reactive._
 import org.apache.jena.graph.{Node, NodeFactory, Triple}
 import org.apache.jena.riot.RDFFormat
 import org.apache.jena.riot.system.{StreamRDF, StreamRDFWriter}
 import org.apache.jena.vocabulary.{OWL2, RDF, RDFS}
+import org.geneontology.whelk.BuiltIn.{Bottom, Top}
 import org.geneontology.whelk._
 import org.renci.relationgraph.Config.{OWLMode, RDFMode}
 import org.semanticweb.owlapi.apibinding.OWLFunctionalSyntaxFactory.{OWLNothing, OWLThing}
@@ -22,7 +19,7 @@ import org.semanticweb.owlapi.model._
 import org.semanticweb.owlapi.model.parameters.Imports
 import zio._
 import zio.blocking._
-import zio.interop.monix._
+import zio.stream._
 
 import scala.io.Source
 import scala.jdk.CollectionConverters._
@@ -37,7 +34,6 @@ object Main extends ZCaseApp[Config] {
   private val OWLSomeValuesFrom = OWL2.someValuesFrom.asNode
   private val OWLOntology = OWL2.Ontology.asNode
   private val df = OWLManager.getOWLDataFactory
-  private val OWLTopObjectProperty = df.getOWLTopObjectProperty
 
   override def run(config: Config, arg: RemainingArgs): ZIO[ZEnv, Nothing, ExitCode] = {
     val ontologyFile = new File(config.ontologyFile)
@@ -65,18 +61,22 @@ object Main extends ZCaseApp[Config] {
             effectBlockingIO(redundantRDFWriter.triple(Triple.create(NodeFactory.createBlankNode("redundant"), RDFType, OWLOntology))))
             .when(config.mode == OWLMode)
           start <- ZIO.effectTotal(System.currentTimeMillis())
-          classes = allClasses(ontology)
-          classesTasks = classes.map(c => Task(processSuperclasses(c, whelk, config)))
-          restrictions = extractAllRestrictions(ontology, specifiedProperties)
-          restrictionsTasks = restrictions.map(r => Task(processRestriction(r, whelk, config.mode)))
-          allTasks = classesTasks ++ restrictionsTasks
-          processed = allTasks.mapParallelUnordered(JRuntime.getRuntime.availableProcessors)(identity)
-          monixTask = processed.foreachL {
+          classes = classHierarchy(whelk)
+          properties = propertyHierarchy(ontology)
+          classesStream = allClasses(ontology)
+          classesTasks = classesStream.map(c => ZIO.effectTotal(processSuperclasses(c, whelk, config)))
+          queue <- Queue.unbounded[Restriction]
+          _ <- traverse(properties, classes, whelk, config.mode, queue)
+          restrictionsStream = Stream.fromQueue(queue).map(r => processRestrictionAndExtendQueue(r, classes, whelk, config.mode, queue))
+          allTasks = classesTasks ++ restrictionsStream
+          processed = allTasks.mapMParUnordered(JRuntime.getRuntime.availableProcessors)(identity)
+          _ <- processed.foreach {
             case TriplesGroup(nonredundant, redundant) =>
-              nonredundant.foreach(nonredundantRDFWriter.triple)
-              redundant.foreach(redundantRDFWriter.triple)
+              ZIO.effect {
+                nonredundant.foreach(nonredundantRDFWriter.triple)
+                redundant.foreach(redundantRDFWriter.triple)
+              }
           }
-          _ <- IO.fromTask(monixTask)
           stop <- ZIO.effectTotal(System.currentTimeMillis())
           _ <- ZIO.effectTotal(scribe.info(s"Computed relations in ${(stop - start) / 1000.0}s"))
         } yield ()
@@ -98,7 +98,87 @@ object Main extends ZCaseApp[Config] {
       }
     }(stream => ZIO.effectTotal(stream.finish()))
 
-  def allClasses(ont: OWLOntology): Observable[OWLClass] = Observable.fromIterable(ont.getClassesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLThing - OWLNothing)
+  def allClasses(ont: OWLOntology): ZStream[Any, Nothing, OWLClass] = Stream.fromIterable(ont.getClassesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLThing - OWLNothing)
+
+  def traverse(properties: Hierarchy, classes: Hierarchy, reasoner: ReasonerState, mode: Config.OutputMode, queue: Queue[Restriction]): UIO[Unit] =
+    ZIO.foreach_(properties.subclasses.getOrElse(Top, Set.empty)) { subprop =>
+      traverseProperty(subprop, properties, classes, reasoner, mode, queue)
+    }
+
+  def traverseProperty(property: AtomicConcept, properties: Hierarchy, classes: Hierarchy, whelk: ReasonerState, mode: Config.OutputMode, queue: Queue[Restriction]): UIO[Unit] = {
+    val restrictions = if (hasSubClasses(property, whelk)) {
+      (classes.subclasses.getOrElse(Top, Set.empty) - Bottom).map(filler => Restriction(Role(property.id), filler))
+    } else Set.empty
+    queue.offerAll(restrictions).unit
+  }
+
+  def hasSubClasses(property: AtomicConcept, whelk: ReasonerState): Boolean = {
+    val queryConcept = AtomicConcept(s"${property.id}${Top.id}")
+    val restriction = ExistentialRestriction(Role(property.id), Top)
+    val axioms = Set(ConceptInclusion(queryConcept, restriction), ConceptInclusion(restriction, queryConcept))
+    val updatedWhelk = Reasoner.assert(axioms, whelk)
+    (updatedWhelk.closureSubsBySuperclass.getOrElse(queryConcept, Set.empty) - Bottom).nonEmpty
+  }
+
+  def processRestrictionAndExtendQueue(restriction: Restriction, classes: Hierarchy, whelk: ReasonerState, mode: Config.OutputMode, queue: Queue[Restriction]): UIO[TriplesGroup] = {
+    for {
+      triples <- ZIO.effectTotal(processRestriction(restriction, whelk, mode))
+      directFillerSubclassesRestrictions = if (triples.redundant.nonEmpty) (classes.subclasses.getOrElse(restriction.filler, Set.empty) - Bottom).map(c => Restriction(restriction.property, c))
+      else Set.empty
+      _ <- queue.offerAll(directFillerSubclassesRestrictions)
+    } yield triples
+  }
+
+  def processRestriction(restriction: Restriction, whelk: ReasonerState, mode: Config.OutputMode): TriplesGroup = {
+    println(s"Querying: ${restriction.property.id} || ${restriction.filler.id}")
+    val queryConcept = AtomicConcept(s"${restriction.property.id}${restriction.filler.id}")
+    val er = ExistentialRestriction(restriction.property, restriction.filler)
+    val axioms = Set(ConceptInclusion(queryConcept, er), ConceptInclusion(er, queryConcept))
+    val updatedWhelk = Reasoner.assert(axioms, whelk)
+    //FIXME don't create these if result is empty
+    val predicate = NodeFactory.createURI(restriction.property.id)
+    val target = NodeFactory.createURI(restriction.filler.id)
+    val (equivalents, directSubclasses) = updatedWhelk.directlySubsumes(queryConcept)
+    val subclasses =
+      updatedWhelk.closureSubsBySuperclass(queryConcept).collect { case x: AtomicConcept => x } - queryConcept - Bottom
+    if (!equivalents(BuiltIn.Bottom)) {
+      val nonredundantTerms = directSubclasses - BuiltIn.Bottom ++ equivalents
+      val nonredundantTriples = mode match {
+        case RDFMode => nonredundantTerms.map(sc => Triple.create(NodeFactory.createURI(sc.id), predicate, target))
+        case OWLMode => nonredundantTerms.flatMap(sc => owlTriples(NodeFactory.createURI(sc.id), predicate, target))
+      }
+      val redundantTriples = mode match {
+        case RDFMode => subclasses.map(sc => Triple.create(NodeFactory.createURI(sc.id), predicate, target))
+        case OWLMode => subclasses.flatMap(sc => owlTriples(NodeFactory.createURI(sc.id), predicate, target))
+      }
+      TriplesGroup(nonredundantTriples, redundantTriples)
+    } else TriplesGroup.empty
+  }
+
+  def classHierarchy(reasoner: ReasonerState): Hierarchy = {
+    val taxonomy = reasoner.computeTaxonomy
+    val subclassTaxonomy = taxonomy.foldLeft(Map.empty[AtomicConcept, Set[AtomicConcept]]) { case (accum, (concept, (_, superclasses))) =>
+      superclasses.foldLeft(accum) { case (inner, superclass) =>
+        val updatedSubclasses = accum.getOrElse(superclass, Set.empty) + concept
+        inner.updated(superclass, updatedSubclasses)
+      }
+    }
+    val equivMap = taxonomy.map { case (concept, (equivs, _)) => concept -> equivs }
+    Hierarchy(equivMap, subclassTaxonomy)
+  }
+
+  def propertyHierarchy(ont: OWLOntology): Hierarchy = {
+    val subPropAxioms = ont.getAxioms(AxiomType.SUB_OBJECT_PROPERTY).asScala.to(Set).collect {
+      case ax if ax.getSubProperty.isNamed && ax.getSuperProperty.isNamed => ConceptInclusion(
+        AtomicConcept(ax.getSubProperty.asOWLObjectProperty.getIRI.toString),
+        AtomicConcept(ax.getSuperProperty.asOWLObjectProperty.getIRI.toString))
+    }
+    val allProps = ont.getObjectPropertiesInSignature((Imports.INCLUDED)).asScala.to(Set).map(prop =>
+      ConceptInclusion(AtomicConcept(prop.getIRI.toString), AtomicConcept(prop.getIRI.toString)))
+    val allAxioms = (subPropAxioms ++ allProps).toSet[Axiom]
+    val whelk = Reasoner.assert(allAxioms)
+    classHierarchy(whelk)
+  }
 
   def processSuperclasses(cls: OWLClass, whelk: ReasonerState, config: Config): TriplesGroup = {
     val subject = NodeFactory.createURI(cls.getIRI.toString)
@@ -127,45 +207,6 @@ object Main extends ZCaseApp[Config] {
     }
   }
 
-  def extractAllRestrictions(ont: OWLOntology, specifiedProperties: Set[OWLObjectProperty]): Observable[Restriction] = {
-    val properties =
-      if (specifiedProperties.nonEmpty) specifiedProperties
-      else ont.getObjectPropertiesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLTopObjectProperty
-    val propertiesStream = Observable.fromIterable(properties)
-    val classesStream = allClasses(ont)
-    for {
-      property <- propertiesStream
-      cls <- classesStream
-    } yield Restriction(property, cls)
-  }
-
-  def processRestriction(combo: Restriction, whelk: ReasonerState, mode: Config.OutputMode): TriplesGroup = {
-    val Restriction(property, cls) = combo
-    val propertyID = property.getIRI.toString
-    val clsID = cls.getIRI.toString
-    val queryConcept = AtomicConcept(s"$propertyID$clsID")
-    val restriction = ExistentialRestriction(Role(propertyID), AtomicConcept(clsID))
-    val axioms = Set(ConceptInclusion(queryConcept, restriction), ConceptInclusion(restriction, queryConcept))
-    val updatedWhelk = Reasoner.assert(axioms, whelk)
-    val predicate = NodeFactory.createURI(property.getIRI.toString)
-    val target = NodeFactory.createURI(cls.getIRI.toString)
-    val (equivalents, directSubclasses) = updatedWhelk.directlySubsumes(queryConcept)
-    val subclasses =
-      updatedWhelk.closureSubsBySuperclass(queryConcept).collect { case x: AtomicConcept => x } - queryConcept - BuiltIn.Bottom
-    if (!equivalents(BuiltIn.Bottom)) {
-      val nonredundantTerms = directSubclasses - BuiltIn.Bottom ++ equivalents
-      val nonredundantTriples = mode match {
-        case RDFMode => nonredundantTerms.map(sc => Triple.create(NodeFactory.createURI(sc.id), predicate, target))
-        case OWLMode => nonredundantTerms.flatMap(sc => owlTriples(NodeFactory.createURI(sc.id), predicate, target))
-      }
-      val redundantTriples = mode match {
-        case RDFMode => subclasses.map(sc => Triple.create(NodeFactory.createURI(sc.id), predicate, target))
-        case OWLMode => subclasses.flatMap(sc => owlTriples(NodeFactory.createURI(sc.id), predicate, target))
-      }
-      TriplesGroup(nonredundantTriples, redundantTriples)
-    } else TriplesGroup.empty
-  }
-
   def owlTriples(subj: Node, pred: Node, obj: Node): Set[Triple] = {
     val hash = MessageDigest.getInstance("SHA-256").digest(s"$subj$pred$obj".getBytes(StandardCharsets.UTF_8))
     val id = Base64.getEncoder.encodeToString(hash)
@@ -178,7 +219,9 @@ object Main extends ZCaseApp[Config] {
     )
   }
 
-  final case class Restriction(property: OWLObjectProperty, filler: OWLClass)
+  final case class Hierarchy(equivs: Map[AtomicConcept, Set[AtomicConcept]], subclasses: Map[AtomicConcept, Set[AtomicConcept]])
+
+  final case class Restriction(property: Role, filler: AtomicConcept)
 
   final case class TriplesGroup(nonredundant: Set[Triple], redundant: Set[Triple])
 
