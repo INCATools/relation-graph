@@ -71,7 +71,6 @@ object Main extends ZCaseApp[Config] {
           restrictionsStream = Stream.fromQueue(queue).map(r => processRestrictionAndExtendQueue(r, classes, whelk, config.mode, queue, activeRestrictions))
           allTasks = classesTasks ++ restrictionsStream
           processed = allTasks.mapMParUnordered(JRuntime.getRuntime.availableProcessors)(identity)
-          //watchFiber <- activeRestrictions.changes.dropUntil(_.isEmpty).take(1).foreach(_ => queue.shutdown).fork
           _ <- processed.foreach {
             case TriplesGroup(nonredundant, redundant) =>
               ZIO.effect {
@@ -79,7 +78,6 @@ object Main extends ZCaseApp[Config] {
                 redundant.foreach(redundantRDFWriter.triple)
               }
           }
-          // _ <- watchFiber.join
           stop <- ZIO.effectTotal(System.currentTimeMillis())
           _ <- ZIO.effectTotal(scribe.info(s"Computed relations in ${(stop - start) / 1000.0}s"))
         } yield ()
