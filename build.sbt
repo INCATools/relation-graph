@@ -23,7 +23,7 @@ libraryDependencies ++= {
     "dev.zio"                    %% "zio"               % zioVersion,
     "dev.zio"                    %% "zio-streams"       % zioVersion,
     "dev.zio"                    %% "zio-interop-monix" % "3.2.2.0-RC2",
-    "io.monix"                   %% "monix"             % "3.2.2",
+    "io.monix"                   %% "monix"             % "3.4.0",
     "org.geneontology"           %% "whelk-owlapi"      % "1.1",
     "com.outr"                   %% "scribe-slf4j"      % "3.5.3",
     "com.github.alexarchambault" %% "case-app"          % "2.0.6",
