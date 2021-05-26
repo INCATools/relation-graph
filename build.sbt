@@ -28,6 +28,7 @@ libraryDependencies ++= {
     "com.outr"                   %% "scribe-slf4j"      % "3.5.5",
     "com.github.alexarchambault" %% "case-app"          % "2.0.6",
     "org.apache.jena"             % "apache-jena-libs"  % "3.17.0" exclude ("org.slf4j", "slf4j-log4j12"),
+    "io.circe"                   %% "circe-yaml"        % "0.13.1",
     "dev.zio"                    %% "zio-test"          % zioVersion % Test,
     "dev.zio"                    %% "zio-test-sbt"      % zioVersion % Test
   )

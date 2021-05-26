@@ -1,11 +1,10 @@
 package org.renci.relationgraph
 
-import java.io.{File, FileOutputStream, OutputStream}
+import java.io.{File, FileOutputStream, FileReader, OutputStream}
 import java.lang.{Runtime => JRuntime}
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.Base64
-
 import caseapp._
 import monix.eval.Task
 import monix.execution.Scheduler.Implicits.global
@@ -15,7 +14,7 @@ import org.apache.jena.riot.RDFFormat
 import org.apache.jena.riot.system.{StreamRDF, StreamRDFWriter}
 import org.apache.jena.vocabulary.{OWL2, RDF, RDFS}
 import org.geneontology.whelk._
-import org.renci.relationgraph.Config.{OWLMode, RDFMode}
+import org.renci.relationgraph.Config.{OWLMode, RDFMode, TSVMode}
 import org.semanticweb.owlapi.apibinding.OWLFunctionalSyntaxFactory.{OWLNothing, OWLThing}
 import org.semanticweb.owlapi.apibinding.OWLManager
 import org.semanticweb.owlapi.model._
@@ -23,6 +22,7 @@ import org.semanticweb.owlapi.model.parameters.Imports
 import zio._
 import zio.blocking._
 import zio.interop.monix._
+import io.circe.yaml.parser
 
 import scala.io.Source
 import scala.jdk.CollectionConverters._
@@ -41,14 +41,10 @@ object Main extends ZCaseApp[Config] {
 
   override def run(config: Config, arg: RemainingArgs): ZIO[ZEnv, Nothing, ExitCode] = {
     val ontologyFile = new File(config.ontologyFile)
-    val nonRedundantOutputFile = new File(config.nonRedundantOutputFile)
-    val redundantOutputFile = new File(config.redundantOutputFile)
-    val streamsManaged = for {
-      nonredundantOutputStream <- Managed.fromAutoCloseable(ZIO.effect(new FileOutputStream(nonRedundantOutputFile)))
-      redundantOutputStream <- Managed.fromAutoCloseable(ZIO.effect(new FileOutputStream(redundantOutputFile)))
-      nonredundantRDFWriter <- createStreamRDF(nonredundantOutputStream)
-      redundantRDFWriter <- createStreamRDF(redundantOutputStream)
-    } yield (nonredundantRDFWriter, redundantRDFWriter)
+    val streamsManaged = config.mode match {
+      case TSVMode => createTSVStreams(config.nonRedundantOutputFile, config.redundantOutputFile, config.prefixes)
+      case _       => createRDFStreams(config.nonRedundantOutputFile, config.redundantOutputFile)
+    }
     val program = streamsManaged.use {
       case (nonredundantRDFWriter, redundantRDFWriter) =>
         for {
@@ -84,6 +80,21 @@ object Main extends ZCaseApp[Config] {
     program.exitCode
   }
 
+  def createRDFStreams(nonRedundantOutputFile: String, redundantOutputFile: String): ZManaged[Any, Throwable, (StreamRDF, StreamRDF)] = for {
+    nonredundantOutputStream <- Managed.fromAutoCloseable(ZIO.effect(new FileOutputStream(new File(nonRedundantOutputFile))))
+    redundantOutputStream <- Managed.fromAutoCloseable(ZIO.effect(new FileOutputStream(new File(redundantOutputFile))))
+    nonredundantRDFWriter <- createStreamRDF(nonredundantOutputStream)
+    redundantRDFWriter <- createStreamRDF(redundantOutputStream)
+  } yield (nonredundantRDFWriter, redundantRDFWriter)
+
+  def createTSVStreams(nonRedundantOutputFile: String, redundantOutputFile: String, prefixesPathOpt: Option[String]): ZManaged[Any, Throwable, (StreamRDF, StreamRDF)] = {
+    for {
+      prefixes <- ZIO.foreach(prefixesPathOpt)(prefixesFromFile).toManaged_
+      nonredundantTSVWriter <- createTSVStream(nonRedundantOutputFile, prefixes)
+      redundantTSVWriter <- createTSVStream(redundantOutputFile, prefixes)
+    } yield (nonredundantTSVWriter, redundantTSVWriter)
+  }
+
   def readPropertiesFile(file: String): ZIO[Blocking, Throwable, Set[OWLObjectProperty]] =
     effectBlocking(Source.fromFile(file, "utf-8")).bracketAuto { source =>
       effectBlocking(source.getLines().map(_.trim).filter(_.nonEmpty).map(line => df.getOWLObjectProperty(IRI.create(line))).to(Set))
@@ -93,6 +104,15 @@ object Main extends ZCaseApp[Config] {
     Managed.make {
       ZIO.effect {
         val stream = StreamRDFWriter.getWriterStream(output, RDFFormat.TURTLE_FLAT, null)
+        stream.start()
+        stream
+      }
+    }(stream => ZIO.effectTotal(stream.finish()))
+
+  def createTSVStream(file: String, prefixes: Option[Map[String, String]]): Managed[Throwable, StreamRDF] =
+    Managed.make {
+      ZIO.effect {
+        val stream = new TSVStreamRDF(file, prefixes)
         stream.start()
         stream
       }
@@ -156,10 +176,12 @@ object Main extends ZCaseApp[Config] {
       val nonredundantTerms = directSubclasses - BuiltIn.Bottom ++ equivalents
       val nonredundantTriples = mode match {
         case RDFMode => nonredundantTerms.map(sc => Triple.create(NodeFactory.createURI(sc.id), predicate, target))
+        case TSVMode => nonredundantTerms.map(sc => Triple.create(NodeFactory.createURI(sc.id), predicate, target))
         case OWLMode => nonredundantTerms.flatMap(sc => owlTriples(NodeFactory.createURI(sc.id), predicate, target))
       }
       val redundantTriples = mode match {
         case RDFMode => subclasses.map(sc => Triple.create(NodeFactory.createURI(sc.id), predicate, target))
+        case TSVMode => subclasses.map(sc => Triple.create(NodeFactory.createURI(sc.id), predicate, target))
         case OWLMode => subclasses.flatMap(sc => owlTriples(NodeFactory.createURI(sc.id), predicate, target))
       }
       TriplesGroup(nonredundantTriples, redundantTriples)
@@ -177,6 +199,13 @@ object Main extends ZCaseApp[Config] {
       Triple.create(restrictionNode, OWLSomeValuesFrom, obj)
     )
   }
+
+  def prefixesFromFile(filename: String): ZIO[Any, Throwable, Map[String, String]] =
+    ZIO.effect(new FileReader(new File(filename))).bracketAuto { reader =>
+      ZIO.fromEither(parser.parse(reader)).flatMap { json =>
+        ZIO.fromEither(json.as[Map[String, String]])
+      }
+    }
 
   final case class Restriction(property: OWLObjectProperty, filler: OWLClass)
 

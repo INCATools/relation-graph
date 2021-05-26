@@ -12,9 +12,8 @@ final case class Config(ontologyFile: String,
                         propertiesFile: Option[String],
                         outputSubclasses: BoolValue = FalseValue,
                         reflexiveSubclasses: BoolValue = TrueValue,
-                        equivalenceAsSubclass: BoolValue = TrueValue) {
-
-}
+                        equivalenceAsSubclass: BoolValue = TrueValue,
+                        prefixes: Option[String])
 
 object Config {
 
@@ -24,12 +23,15 @@ object Config {
 
   case object OWLMode extends OutputMode
 
+  case object TSVMode extends OutputMode
+
   object OutputMode {
 
     implicit val argParser: ArgParser[OutputMode] = SimpleArgParser.from[OutputMode]("output mode") { arg =>
       arg.toLowerCase match {
         case "rdf" => Right(RDFMode)
         case "owl" => Right(OWLMode)
+        case "tsv" => Right(TSVMode)
         case _     => Left(MalformedValue("output mode", arg))
       }
     }
