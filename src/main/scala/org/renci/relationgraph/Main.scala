@@ -67,8 +67,9 @@ object Main extends ZCaseApp[Config] {
           classesTasks = classesStream.map(c => ZIO.effectTotal(processSuperclasses(c, whelk, config)))
           queue <- Queue.unbounded[Restriction]
           activeRestrictions <- Ref.make(0)
-          _ <- traverse(properties, classes, whelk, config.mode, queue, activeRestrictions)
-          restrictionsStream = Stream.fromQueue(queue).map(r => processRestrictionAndExtendQueue(r, classes, whelk, config.mode, queue, activeRestrictions))
+          seenRef <- Ref.make(Map.empty[AtomicConcept, Set[AtomicConcept]])
+          _ <- traverse(properties, classes, whelk, config.mode, queue, activeRestrictions, seenRef)
+          restrictionsStream = Stream.fromQueue(queue).map(r => processRestrictionAndExtendQueue(r, classes, whelk, config.mode, queue, activeRestrictions, seenRef))
           allTasks = classesTasks ++ restrictionsStream
           processed = allTasks.mapMParUnordered(JRuntime.getRuntime.availableProcessors)(identity)
           _ <- processed.foreach {
@@ -101,22 +102,33 @@ object Main extends ZCaseApp[Config] {
 
   def allClasses(ont: OWLOntology): ZStream[Any, Nothing, OWLClass] = Stream.fromIterable(ont.getClassesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLThing - OWLNothing)
 
-  def traverse(properties: Hierarchy, classes: Hierarchy, reasoner: ReasonerState, mode: Config.OutputMode, queue: Queue[Restriction], activeRestrictions: Ref[Int]): UIO[Unit] =
-    ZIO.foreach_(properties.subclasses.getOrElse(Top, Set.empty)) { subprop =>
-      traverseProperty(subprop, properties, classes, reasoner, mode, queue, activeRestrictions)
+  def traverse(properties: Hierarchy, classes: Hierarchy, reasoner: ReasonerState, mode: Config.OutputMode, queue: Queue[Restriction], activeRestrictions: Ref[Int], seenRef: Ref[Map[AtomicConcept, Set[AtomicConcept]]]): UIO[Unit] = {
+    ZIO.foreachPar_(properties.subclasses.getOrElse(Top, Set.empty) - Bottom) { subprop =>
+      traverseProperty(subprop, properties, classes, reasoner, mode, queue, activeRestrictions, seenRef)
     }
+  }
 
-  def traverseProperty(property: AtomicConcept, properties: Hierarchy, classes: Hierarchy, whelk: ReasonerState, mode: Config.OutputMode, queue: Queue[Restriction], activeRestrictions: Ref[Int]): UIO[Unit] = {
-    val restrictions = if (hasSubClasses(property, whelk)) {
+  def traverseProperty(property: AtomicConcept, properties: Hierarchy, classes: Hierarchy, whelk: ReasonerState, mode: Config.OutputMode, queue: Queue[Restriction], activeRestrictions: Ref[Int], seenRef: Ref[Map[AtomicConcept, Set[AtomicConcept]]]): UIO[Unit] = {
+    val propertyHasResults = hasSubClasses(property, whelk)
+    val restrictions = if (propertyHasResults) {
       (classes.subclasses.getOrElse(Top, Set.empty) - Bottom).map(filler => Restriction(Role(property.id), filler))
-    } else Set.empty
+    } else Set.empty[Restriction]
     for {
+      subProperties <- seenRef.modify { seen =>
+        val subProperties = properties.subclasses.getOrElse(property, Set.empty) - Bottom
+        val seenForThisProperty = seen.getOrElse(property, Set.empty) ++ restrictions.map(_.filler)
+        val updatedSeen = seen.updated(property, seenForThisProperty)
+        val unseenProperties = subProperties.filterNot(updatedSeen.keySet)
+        (unseenProperties, updatedSeen ++ unseenProperties.map(p => p -> Set.empty[AtomicConcept]).toMap)
+      }
+      _ <- ZIO.foreachPar_(subProperties) { subProp =>
+        traverseProperty(subProp, properties, classes, whelk, mode, queue, activeRestrictions, seenRef)
+      }
       _ <- activeRestrictions.update(current => current + restrictions.size)
       _ <- queue.offerAll(restrictions).unit
       active <- activeRestrictions.get
       _ <- queue.shutdown.when(active < 1)
     } yield ()
-
   }
 
   def hasSubClasses(property: AtomicConcept, whelk: ReasonerState): Boolean = {
@@ -127,12 +139,18 @@ object Main extends ZCaseApp[Config] {
     (updatedWhelk.closureSubsBySuperclass.getOrElse(queryConcept, Set.empty) - Bottom).nonEmpty
   }
 
-  def processRestrictionAndExtendQueue(restriction: Restriction, classes: Hierarchy, whelk: ReasonerState, mode: Config.OutputMode, queue: Queue[Restriction], activeRestrictions: Ref[Int]): UIO[TriplesGroup] = {
+  def processRestrictionAndExtendQueue(restriction: Restriction, classes: Hierarchy, whelk: ReasonerState, mode: Config.OutputMode, queue: Queue[Restriction], activeRestrictions: Ref[Int], seenRef: Ref[Map[AtomicConcept, Set[AtomicConcept]]]): UIO[TriplesGroup] = {
     for {
       triples <- ZIO.effectTotal(processRestriction(restriction, whelk, mode))
-      directFillerSubclassesRestrictions = if (triples.redundant.nonEmpty)
-        (classes.subclasses.getOrElse(restriction.filler, Set.empty) - Bottom).map(c => Restriction(restriction.property, c))
-      else Set.empty
+      directFillerSubclassesRestrictions <- if (triples.redundant.nonEmpty) seenRef.modify { seen =>
+        val propertyConcept = AtomicConcept(restriction.property.id)
+        val seenForThisProperty = seen.getOrElse(propertyConcept, Set.empty)
+        val subClasses = classes.subclasses.getOrElse(restriction.filler, Set.empty) - Bottom
+        val unseenSubClasses = subClasses -- seenForThisProperty
+        val updatedSeen = seen.updated(propertyConcept, seenForThisProperty ++ subClasses)
+        val newRestrictions = unseenSubClasses.map(c => Restriction(restriction.property, c))
+        (newRestrictions, updatedSeen)
+      } else ZIO.succeed(Set.empty[Restriction])
       _ <- activeRestrictions.update(current => current - 1 + directFillerSubclassesRestrictions.size)
       _ <- queue.offerAll(directFillerSubclassesRestrictions)
       active <- activeRestrictions.get
@@ -179,12 +197,14 @@ object Main extends ZCaseApp[Config] {
 
   def propertyHierarchy(ont: OWLOntology): Hierarchy = {
     val subPropAxioms = ont.getAxioms(AxiomType.SUB_OBJECT_PROPERTY).asScala.to(Set).collect {
-      case ax if ax.getSubProperty.isNamed && ax.getSuperProperty.isNamed => ConceptInclusion(
+      case ax if ax.getSubProperty.isNamed && ax.getSuperProperty.isNamed && !ax.getSuperProperty.isOWLTopObjectProperty => ConceptInclusion(
         AtomicConcept(ax.getSubProperty.asOWLObjectProperty.getIRI.toString),
         AtomicConcept(ax.getSuperProperty.asOWLObjectProperty.getIRI.toString))
     }
-    val allProps = ont.getObjectPropertiesInSignature((Imports.INCLUDED)).asScala.to(Set).map(prop =>
-      ConceptInclusion(AtomicConcept(prop.getIRI.toString), AtomicConcept(prop.getIRI.toString)))
+    val allProps = ont.getObjectPropertiesInSignature((Imports.INCLUDED)).asScala.to(Set)
+      .filterNot(_.isOWLTopObjectProperty)
+      .map(prop =>
+        ConceptInclusion(AtomicConcept(prop.getIRI.toString), AtomicConcept(prop.getIRI.toString)))
     val allAxioms = (subPropAxioms ++ allProps).toSet[Axiom]
     val whelk = Reasoner.assert(allAxioms)
     classHierarchy(whelk)
