@@ -18,28 +18,27 @@ object TestRelationGraph extends DefaultRunnableSpec {
   def spec =
     suite("RelationGraphSpec") {
       testM("testMaterializedRelations") {
-//        for {
-//          manager <- ZIO.effect(OWLManager.createOWLOntologyManager())
-//          ontology <- ZIO.effect(manager.loadOntologyFromOntologyDocument(this.getClass.getResourceAsStream("materialize_test.ofn")))
-//          restrictions = Main.extractAllRestrictions(ontology, Set.empty)
-//          whelkOntology = Bridge.ontologyToAxioms(ontology)
-//          whelk = Reasoner.assert(whelkOntology)
-//          results <- restrictions.map(Main.processRestriction(_, whelk, Config.RDFMode)).runCollect
-//          triples <- ZIO.fromOption(results.reduceOption((left, right) => TriplesGroup(left.nonredundant ++ right.nonredundant, left.redundant ++ right.redundant)))
-//          TriplesGroup(nonredundant, redundant) = triples
-//        } yield assert(nonredundant)(contains(Triple.create(n(s"$Prefix#A"), P, n(s"$Prefix#D")))) &&
-//          assert(redundant)(contains(Triple.create(n(s"$Prefix#A"), P, n(s"$Prefix#D")))) &&
-//          assert(nonredundant)(not(contains(Triple.create(n(s"$Prefix#C"), P, n(s"$Prefix#D"))))) &&
-//          assert(redundant)(contains(Triple.create(n(s"$Prefix#C"), P, n(s"$Prefix#D")))) &&
-//          assert(nonredundant)(contains(Triple.create(n(s"$Prefix#F"), P, n(s"$Prefix#B")))) &&
-//          assert(redundant)(contains(Triple.create(n(s"$Prefix#F"), P, n(s"$Prefix#B")))) &&
-//          assert(nonredundant)(not(contains(Triple.create(n(s"$Prefix#F"), P, n(s"$Prefix#C"))))) &&
-//          assert(redundant)(not(contains(Triple.create(n(s"$Prefix#F"), P, n(s"$Prefix#C"))))) &&
-//          assert(nonredundant)(contains(Triple.create(n(s"$Prefix#E"), P, n(s"$Prefix#C")))) &&
-//          assert(redundant)(contains(Triple.create(n(s"$Prefix#E"), P, n(s"$Prefix#C")))) &&
-//          assert(nonredundant)(not(contains(Triple.create(n(s"$Prefix#E"), P, n(s"$Prefix#A"))))) &&
-//          assert(redundant)(contains(Triple.create(n(s"$Prefix#E"), P, n(s"$Prefix#A"))))
-        ZIO.succeed(assert(true)(isTrue)) //FIXME
+        for {
+          manager <- ZIO.effect(OWLManager.createOWLOntologyManager())
+          ontology <- ZIO.effect(manager.loadOntologyFromOntologyDocument(this.getClass.getResourceAsStream("materialize_test.ofn")))
+          whelkOntology = Bridge.ontologyToAxioms(ontology)
+          whelk = Reasoner.assert(whelkOntology)
+          resultsStream <- Main.computeRelations(ontology, whelk, Set.empty, false, false, Config.RDFMode)
+          results <- resultsStream.runCollect
+          triples <- ZIO.fromOption(results.reduceOption((left, right) => TriplesGroup(left.nonredundant ++ right.nonredundant, left.redundant ++ right.redundant)))
+          TriplesGroup(nonredundant, redundant) = triples
+        } yield assert(nonredundant)(contains(Triple.create(n(s"$Prefix#A"), P, n(s"$Prefix#D")))) &&
+          assert(redundant)(contains(Triple.create(n(s"$Prefix#A"), P, n(s"$Prefix#D")))) &&
+          assert(nonredundant)(not(contains(Triple.create(n(s"$Prefix#C"), P, n(s"$Prefix#D"))))) &&
+          assert(redundant)(contains(Triple.create(n(s"$Prefix#C"), P, n(s"$Prefix#D")))) &&
+          assert(nonredundant)(contains(Triple.create(n(s"$Prefix#F"), P, n(s"$Prefix#B")))) &&
+          assert(redundant)(contains(Triple.create(n(s"$Prefix#F"), P, n(s"$Prefix#B")))) &&
+          assert(nonredundant)(not(contains(Triple.create(n(s"$Prefix#F"), P, n(s"$Prefix#C"))))) &&
+          assert(redundant)(not(contains(Triple.create(n(s"$Prefix#F"), P, n(s"$Prefix#C"))))) &&
+          assert(nonredundant)(contains(Triple.create(n(s"$Prefix#E"), P, n(s"$Prefix#C")))) &&
+          assert(redundant)(contains(Triple.create(n(s"$Prefix#E"), P, n(s"$Prefix#C")))) &&
+          assert(nonredundant)(not(contains(Triple.create(n(s"$Prefix#E"), P, n(s"$Prefix#A"))))) &&
+          assert(redundant)(contains(Triple.create(n(s"$Prefix#E"), P, n(s"$Prefix#A"))))
       }
     }
 

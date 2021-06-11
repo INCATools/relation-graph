@@ -60,17 +60,7 @@ object Main extends ZCaseApp[Config] {
             effectBlockingIO(redundantRDFWriter.triple(Triple.create(NodeFactory.createBlankNode("redundant"), RDFType, OWLOntology))))
             .when(config.mode == OWLMode)
           start <- ZIO.effectTotal(System.currentTimeMillis())
-          classes = classHierarchy(whelk)
-          properties = propertyHierarchy(ontology)
-          classesStream = allClasses(ontology)
-          classesTasks = classesStream.map(c => ZIO.effectTotal(processSuperclasses(c, whelk, config)))
-          queue <- Queue.unbounded[Restriction]
-          activeRestrictions <- Ref.make(0)
-          seenRef <- Ref.make(Map.empty[AtomicConcept, Set[AtomicConcept]])
-          _ <- traverse(specifiedProperties, properties, classes, queue, activeRestrictions, seenRef)
-          restrictionsStream = Stream.fromQueue(queue).map(r => processRestrictionAndExtendQueue(r, properties, classes, whelk, config.mode, specifiedProperties.isEmpty, queue, activeRestrictions, seenRef))
-          allTasks = classesTasks ++ restrictionsStream
-          processed = allTasks.mapMParUnordered(JRuntime.getRuntime.availableProcessors)(identity)
+          processed <- computeRelations(ontology, whelk, specifiedProperties, config.reflexiveSubclasses.bool, config.equivalenceAsSubclass.bool, config.mode)
           _ <- processed.foreach {
             case TriplesGroup(nonredundant, redundant) =>
               ZIO.effect {
@@ -83,6 +73,21 @@ object Main extends ZCaseApp[Config] {
         } yield ()
     }
     program.exitCode
+  }
+
+  def computeRelations(ontology: OWLOntology, whelk: ReasonerState, specifiedProperties: Set[AtomicConcept], reflexiveSubclasses: Boolean, equivalenceAsSubclass: Boolean, mode: Config.OutputMode): UIO[UStream[TriplesGroup]] = {
+    val classes = classHierarchy(whelk)
+    val properties = propertyHierarchy(ontology)
+    val classesStream = allClasses(ontology)
+    val classesTasks = classesStream.map(c => ZIO.effectTotal(processSuperclasses(c, whelk, reflexiveSubclasses, equivalenceAsSubclass)))
+    for {
+      queue <- Queue.unbounded[Restriction]
+      activeRestrictions <- Ref.make(0)
+      seenRef <- Ref.make(Map.empty[AtomicConcept, Set[AtomicConcept]])
+      _ <- traverse(specifiedProperties, properties, classes, queue, activeRestrictions, seenRef)
+      restrictionsStream = Stream.fromQueue(queue).map(r => processRestrictionAndExtendQueue(r, properties, classes, whelk, mode, specifiedProperties.isEmpty, queue, activeRestrictions, seenRef))
+      allTasks = classesTasks ++ restrictionsStream
+    } yield allTasks.mapMParUnordered(JRuntime.getRuntime.availableProcessors)(identity)
   }
 
   def readPropertiesFile(file: String): ZIO[Blocking, Throwable, Set[AtomicConcept]] =
@@ -203,7 +208,7 @@ object Main extends ZCaseApp[Config] {
     classHierarchy(whelk)
   }
 
-  def processSuperclasses(cls: OWLClass, whelk: ReasonerState, config: Config): TriplesGroup = {
+  def processSuperclasses(cls: OWLClass, whelk: ReasonerState, reflexiveSubclasses: Boolean, equivalenceAsSubclass: Boolean): TriplesGroup = {
     val subject = NodeFactory.createURI(cls.getIRI.toString)
     val concept = AtomicConcept(cls.getIRI.toString)
     val allSuperclasses = (whelk.closureSubsBySubclass.getOrElse(concept, Set.empty) - BuiltIn.Top)
@@ -211,15 +216,15 @@ object Main extends ZCaseApp[Config] {
     if (allSuperclasses(BuiltIn.Bottom)) TriplesGroup.empty //unsatisfiable
     else {
       val (equivs, directSuperclasses) = whelk.directlySubsumedBy(concept)
-      val adjustedEquivs = if (config.reflexiveSubclasses.bool) equivs + concept else equivs - concept
+      val adjustedEquivs = if (reflexiveSubclasses) equivs + concept else equivs - concept
       val directSuperclassTriples = directSuperclasses.map(c => Triple.create(subject, RDFSSubClassOf, NodeFactory.createURI(c.id)))
-      val equivalentClassTriples = if (config.equivalenceAsSubclass.bool)
+      val equivalentClassTriples = if (equivalenceAsSubclass)
         adjustedEquivs.map(c => Triple.create(subject, RDFSSubClassOf, NodeFactory.createURI(c.id)))
       else
         adjustedEquivs.map(c => Triple.create(subject, OWLEquivalentClass, NodeFactory.createURI(c.id)))
       val nonredundantTriples = directSuperclassTriples ++ equivalentClassTriples
-      val adjustedSuperclasses = if (config.reflexiveSubclasses.bool) allSuperclasses + concept else allSuperclasses - concept
-      val redundantTriples = if (config.equivalenceAsSubclass.bool)
+      val adjustedSuperclasses = if (reflexiveSubclasses) allSuperclasses + concept else allSuperclasses - concept
+      val redundantTriples = if (equivalenceAsSubclass)
         adjustedSuperclasses.map(c => Triple.create(subject, RDFSSubClassOf, NodeFactory.createURI(c.id)))
       else {
         val superclassesMinusEquiv = adjustedSuperclasses -- adjustedEquivs
