@@ -4,7 +4,7 @@ organization := "org.renci"
 
 name := "relation-graph"
 
-version := "1.2"
+version := "1.2.1"
 
 licenses := Seq("MIT license" -> url("https://opensource.org/licenses/MIT"))
 
