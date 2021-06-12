@@ -6,7 +6,9 @@ import caseapp.core.parser.Parser
 import caseapp.core.util.Formatter
 import caseapp.core.{Error, RemainingArgs}
 import zio._
-import zio.console.{putStrLn, Console}
+import zio.console.{Console, putStrLn}
+
+import java.io.IOException
 
 /**
   * Adapted from caseapp.cats.IOCaseApp
@@ -23,13 +25,13 @@ abstract class ZCaseApp[T](implicit val parser0: Parser[T], val messages: Help[T
 
   def run(options: T, remainingArgs: RemainingArgs): ZIO[ZEnv, Nothing, ExitCode]
 
-  private[this] def error(message: Error): ZIO[Console, Nothing, ExitCode] =
+  private[this] def error(message: Error): ZIO[Console, IOException, ExitCode] =
     putStrLn(message.message).as(ExitCode.failure)
 
-  private[this] def helpAsked: ZIO[Console, Nothing, ExitCode] =
+  private[this] def helpAsked: ZIO[Console, IOException, ExitCode] =
     putStrLn(messages.withHelp.help).as(ExitCode.success)
 
-  private[this] def usageAsked: ZIO[Console, Nothing, ExitCode] =
+  private[this] def usageAsked: ZIO[Console, IOException, ExitCode] =
     putStrLn(messages.withHelp.usage).as(ExitCode.success)
 
   /**
@@ -64,10 +66,10 @@ abstract class ZCaseApp[T](implicit val parser0: Parser[T], val messages: Help[T
 
   override def run(args: List[String]): ZIO[ZEnv, Nothing, ExitCode] =
     parser.withHelp.detailedParse(expandArgs(args), stopAtFirstUnrecognized) match {
-      case Left(err) => error(err)
-      case Right((WithHelp(_, true, _), _)) => helpAsked
-      case Right((WithHelp(true, _, _), _)) => usageAsked
-      case Right((WithHelp(_, _, Left(err)), _)) => error(err)
+      case Left(err) => error(err).orDie
+      case Right((WithHelp(_, true, _), _)) => helpAsked.orDie
+      case Right((WithHelp(true, _, _), _)) => usageAsked.orDie
+      case Right((WithHelp(_, _, Left(err)), _)) => error(err).orDie
       case Right((WithHelp(_, _, Right(t)), remainingArgs)) => run(t, remainingArgs)
     }
 
