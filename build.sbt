@@ -22,7 +22,7 @@ libraryDependencies ++= {
   Seq(
     "dev.zio"                    %% "zio"               % zioVersion,
     "dev.zio"                    %% "zio-streams"       % zioVersion,
-    "org.geneontology"           %% "whelk-owlapi"      % "1.1",
+    "org.geneontology"           %% "whelk-owlapi"      % "1.1.1",
     "com.outr"                   %% "scribe-slf4j"      % "3.5.5",
     "com.github.alexarchambault" %% "case-app"          % "2.0.6",
     "org.apache.jena"             % "apache-jena-libs"  % "3.17.0" exclude ("org.slf4j", "slf4j-log4j12"),
