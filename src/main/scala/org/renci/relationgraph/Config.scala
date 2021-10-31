@@ -5,8 +5,7 @@ import caseapp.core.argparser.{ArgParser, SimpleArgParser}
 import org.renci.relationgraph.Config.{BoolValue, FalseValue, TrueValue}
 
 final case class Config(ontologyFile: String,
-                        nonRedundantOutputFile: String,
-                        redundantOutputFile: String,
+                        outputFile: String,
                         mode: Config.OutputMode = Config.RDFMode,
                         property: List[String] = Nil,
                         propertiesFile: Option[String],
