@@ -38,11 +38,7 @@ object Main extends ZCaseApp[Config] {
   private val OWLOntology = OWL2.Ontology.asNode
 
   override def run(config: Config, arg: RemainingArgs): ZIO[ZEnv, Nothing, ExitCode] = {
-    val streamManaged = for {
-      outputStream <- Managed.fromAutoCloseable(ZIO.effect(new FileOutputStream(new File(config.outputFile))))
-      rdfWriter <- createStreamRDF(outputStream)
-    } yield rdfWriter
-    val program = streamManaged.use { rdfWriter =>
+    val program = createStreamRDF(config.outputFile).use { rdfWriter =>
       for {
         fileProperties <- config.propertiesFile.map(readPropertiesFile).getOrElse(ZIO.succeed(Set.empty[AtomicConcept]))
         specifiedProperties = fileProperties ++ config.property.map(prop => AtomicConcept(prop)).to(Set)
@@ -93,14 +89,16 @@ object Main extends ZCaseApp[Config] {
     ontology <- ZIO.effect(manager.loadOntologyFromOntologyDocument(new File(path)))
   } yield ontology
 
-  def createStreamRDF(output: OutputStream): Managed[Throwable, StreamRDF] =
-    Managed.make {
+  def createStreamRDF(path: String): TaskManaged[StreamRDF] = for {
+    outputStream <- Managed.fromAutoCloseable(ZIO.effect(new FileOutputStream(new File(path))))
+    rdfWriter <- Managed.make {
       ZIO.effect {
-        val stream = StreamRDFWriter.getWriterStream(output, RDFFormat.TURTLE_FLAT, null)
+        val stream = StreamRDFWriter.getWriterStream(outputStream, RDFFormat.TURTLE_FLAT, null)
         stream.start()
         stream
       }
     }(stream => ZIO.succeed(stream.finish()))
+  } yield rdfWriter
 
   def allClasses(ont: OWLOntology): ZStream[Any, Nothing, OWLClass] = Stream.fromIterable(ont.getClassesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLThing - OWLNothing)
 
