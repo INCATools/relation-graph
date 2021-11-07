@@ -17,7 +17,7 @@ import zio._
 import zio.blocking._
 import zio.stream._
 
-import java.io.{File, FileOutputStream, OutputStream}
+import java.io.{File, FileOutputStream}
 import java.lang.{Runtime => JRuntime}
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -46,12 +46,13 @@ object Main extends ZCaseApp[Config] {
         whelkOntology = Bridge.ontologyToAxioms(ontology)
         _ <- ZIO.succeed(scribe.info("Running reasoner"))
         whelk = Reasoner.assert(whelkOntology)
+        indexedWhelk = IndexedReasonerState(whelk)
         _ <- ZIO.succeed(scribe.info("Done running reasoner"))
         _ <- ZIO.fail(new Exception("Ontology is incoherent; please correct unsatisfiable classes.")).when(isIncoherent(whelk))
         _ <- effectBlockingIO(rdfWriter.triple(Triple.create(NodeFactory.createBlankNode("redundant"), RDFType, OWLOntology)))
           .when(config.mode == OWLMode)
         start <- ZIO.succeed(System.currentTimeMillis())
-        triplesStream = computeRelations(ontology, whelk, specifiedProperties, config.outputSubclasses.bool, config.reflexiveSubclasses.bool, config.equivalenceAsSubclass.bool, config.mode)
+        triplesStream = computeRelations(ontology, indexedWhelk, specifiedProperties, config.outputSubclasses.bool, config.reflexiveSubclasses.bool, config.equivalenceAsSubclass.bool, config.mode)
         _ <- triplesStream.foreach {
           case TriplesGroup(triples) => ZIO.effect(triples.foreach(rdfWriter.triple))
         }
@@ -62,11 +63,11 @@ object Main extends ZCaseApp[Config] {
     program.exitCode
   }
 
-  def computeRelations(ontology: OWLOntology, whelk: ReasonerState, specifiedProperties: Set[AtomicConcept], outputSubclasses: Boolean, reflexiveSubclasses: Boolean, equivalenceAsSubclass: Boolean, mode: Config.OutputMode): UStream[TriplesGroup] = {
-    val classes = classHierarchy(whelk)
+  def computeRelations(ontology: OWLOntology, whelk: IndexedReasonerState, specifiedProperties: Set[AtomicConcept], outputSubclasses: Boolean, reflexiveSubclasses: Boolean, equivalenceAsSubclass: Boolean, mode: Config.OutputMode): UStream[TriplesGroup] = {
+    val classes = classHierarchy(whelk.state)
     val properties = propertyHierarchy(ontology)
     val classesTasks = if (outputSubclasses) {
-      allClasses(ontology).map(c => ZIO.succeed(processSuperclasses(c, whelk, reflexiveSubclasses, equivalenceAsSubclass)))
+      allClasses(ontology).map(c => ZIO.succeed(processSuperclasses(c, whelk.state, reflexiveSubclasses, equivalenceAsSubclass)))
     } else Stream.empty
     val streamZ = for {
       queue <- Queue.unbounded[Restriction]
@@ -124,7 +125,7 @@ object Main extends ZCaseApp[Config] {
     } yield ()
   }
 
-  def processRestrictionAndExtendQueue(restriction: Restriction, properties: Hierarchy, classes: Hierarchy, whelk: ReasonerState, mode: Config.OutputMode, descendProperties: Boolean, queue: Queue[Restriction], activeRestrictions: Ref[Int], seenRef: Ref[Map[AtomicConcept, Set[AtomicConcept]]]): UIO[TriplesGroup] = {
+  def processRestrictionAndExtendQueue(restriction: Restriction, properties: Hierarchy, classes: Hierarchy, whelk: IndexedReasonerState, mode: Config.OutputMode, descendProperties: Boolean, queue: Queue[Restriction], activeRestrictions: Ref[Int], seenRef: Ref[Map[AtomicConcept, Set[AtomicConcept]]]): UIO[TriplesGroup] = {
     val triples = processRestriction(restriction, whelk, mode)
     for {
       directFillerSubclassesRestrictions <- if (triples.redundant.nonEmpty) seenRef.modify { seen =>
@@ -153,7 +154,7 @@ object Main extends ZCaseApp[Config] {
     } yield triples
   }
 
-  def processRestriction(restriction: Restriction, whelk: ReasonerState, mode: Config.OutputMode): TriplesGroup = {
+  def processRestriction(restriction: Restriction, whelk: IndexedReasonerState, mode: Config.OutputMode): TriplesGroup = {
     val subclasses = queryExistentialSubclasses(restriction, whelk)
     if (subclasses.nonEmpty) {
       val predicate = NodeFactory.createURI(restriction.property.id)
@@ -166,12 +167,17 @@ object Main extends ZCaseApp[Config] {
     } else TriplesGroup.empty
   }
 
-  def queryExistentialSubclasses(restriction: Restriction, whelk: ReasonerState): Set[AtomicConcept] = {
-    val queryConcept = AtomicConcept(s"${restriction.property.id}${restriction.filler.id}")
+  // This is a faster way to compute these than the standard Whelk algorithm
+  def queryExistentialSubclasses(restriction: Restriction, whelk: IndexedReasonerState): Set[AtomicConcept] = {
     val er = ExistentialRestriction(restriction.property, restriction.filler)
-    val axioms = Set(ConceptInclusion(queryConcept, er), ConceptInclusion(er, queryConcept))
-    val updatedWhelk = Reasoner.assert(axioms, whelk)
-    updatedWhelk.closureSubsBySuperclass(queryConcept).collect { case x: AtomicConcept => x } - queryConcept - Bottom
+    val rs = whelk.reverseRoleHierarchy.getOrElse(er.role, Set.empty)
+    val cs = whelk.state.closureSubsBySuperclass.getOrElse(er.concept, Set.empty)
+    val validTargets = cs.intersect(whelk.allTargets)
+    (for {
+      target <- validTargets
+      (r, es) <- whelk.linksByTargetList.getOrElse(target, Map.empty)
+      if rs(r)
+    } yield es.iterator).flatten.to(Set).collect { case x: AtomicConcept => x } - Bottom
   }
 
   def classHierarchy(reasoner: ReasonerState): Hierarchy = {
@@ -250,6 +256,24 @@ object Main extends ZCaseApp[Config] {
   object TriplesGroup {
 
     val empty: TriplesGroup = TriplesGroup(Set.empty)
+
+  }
+
+  final case class IndexedReasonerState(state: ReasonerState) {
+
+    val negativeExistentials: Set[ExistentialRestriction] = state.negExistsMapByConcept.flatMap(_._2).to(Set)
+
+    val reverseRoleHierarchy: Map[Role, Set[Role]] = (for {
+      (r, ss) <- state.hier.toList
+      s <- ss
+    } yield {
+      s -> r
+    }).groupMapReduce(_._1)(e => Set(e._2))(_ ++ _)
+
+    val allTargets: Set[Concept] = state.linksByTarget.keySet
+
+    val linksByTargetList: Map[Concept, List[(Role, List[Concept])]] =
+      state.linksByTarget.view.mapValues(_.to(List)).toMap
 
   }
 
