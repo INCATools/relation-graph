@@ -8,7 +8,7 @@ version := "2.0-SNAPSHOT"
 
 licenses := Seq("MIT license" -> url("https://opensource.org/licenses/MIT"))
 
-scalaVersion := "2.13.6"
+scalaVersion := "2.13.7"
 
 scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8")
 
@@ -20,13 +20,13 @@ val zioVersion = "1.0.12"
 
 libraryDependencies ++= {
   Seq(
-    "dev.zio"                    %% "zio"               % zioVersion,
-    "dev.zio"                    %% "zio-streams"       % zioVersion,
-    "org.geneontology"           %% "whelk-owlapi"      % "1.1.1",
-    "com.outr"                   %% "scribe-slf4j"      % "3.6.3",
-    "com.github.alexarchambault" %% "case-app"          % "2.0.6",
-    "org.apache.jena"             % "apache-jena-libs"  % "4.2.0" exclude ("org.slf4j", "slf4j-log4j12"),
-    "dev.zio"                    %% "zio-test"          % zioVersion % Test,
-    "dev.zio"                    %% "zio-test-sbt"      % zioVersion % Test
+    "dev.zio"                    %% "zio"              % zioVersion,
+    "dev.zio"                    %% "zio-streams"      % zioVersion,
+    "org.geneontology"           %% "whelk-owlapi"     % "1.1.1",
+    "com.outr"                   %% "scribe-slf4j"     % "3.6.3",
+    "com.github.alexarchambault" %% "case-app"         % "2.0.6",
+    "org.apache.jena"             % "apache-jena-libs" % "4.2.0" exclude ("org.slf4j", "slf4j-log4j12"),
+    "dev.zio"                    %% "zio-test"         % zioVersion % Test,
+    "dev.zio"                    %% "zio-test-sbt"     % zioVersion % Test
   )
 }
