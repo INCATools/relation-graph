@@ -2,7 +2,7 @@ package org.renci.relationgraph
 
 import org.apache.jena.graph.{Node, NodeFactory, Triple}
 import org.geneontology.whelk.{Bridge, Reasoner}
-import org.renci.relationgraph.Main.TriplesGroup
+import org.renci.relationgraph.Main.{IndexedReasonerState, TriplesGroup}
 import org.semanticweb.owlapi.apibinding.OWLManager
 import zio._
 import zio.test.Assertion._
@@ -23,7 +23,8 @@ object TestRelationGraph extends DefaultRunnableSpec {
           ontology <- ZIO.effect(manager.loadOntologyFromOntologyDocument(this.getClass.getResourceAsStream("materialize_test.ofn")))
           whelkOntology = Bridge.ontologyToAxioms(ontology)
           whelk = Reasoner.assert(whelkOntology)
-          resultsStream = Main.computeRelations(ontology, whelk, Set.empty, true, false, false, Config.RDFMode)
+          indexedWhelk = IndexedReasonerState(whelk)
+          resultsStream = Main.computeRelations(ontology, indexedWhelk, Set.empty, true, false, false, Config.RDFMode)
           results <- resultsStream.runCollect
           triples <- ZIO.fromOption(results.reduceOption((left, right) => TriplesGroup(left.redundant ++ right.redundant)))
           TriplesGroup(redundant) = triples
