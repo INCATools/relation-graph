@@ -5,7 +5,7 @@ Materialize OWL existential relations
 ## Run
 
 ```bash
-relation-graph --ontology-file uberon.owl --non-redundant-output-file nonredundant.ttl --redundant-output-file redundant.ttl --mode rdf --property 'http://purl.obolibrary.org/obo/BFO_0000050' --property 'http://purl.obolibrary.org/obo/BFO_0000051' --properties-file more_properties.txt
+relation-graph --ontology-file uberon.owl --output-file relations.ttl --mode rdf --property 'http://purl.obolibrary.org/obo/BFO_0000050' --property 'http://purl.obolibrary.org/obo/BFO_0000051' --properties-file more_properties.txt
 ```
 
 You can leave off the `property` and `properties-file` arguments; in that case all OWL object properties are used. The default mode is `rdf`; 
@@ -16,6 +16,24 @@ http://purl.obolibrary.org/obo/BFO_0000050
 http://purl.obolibrary.org/obo/BFO_0000051
 ```
 **Note:** Before running, you may need to increase the amount of memory available for Java. On UNIX style systems, this is done by setting the `JAVA_OPTS` environment variable. For example, to set the amount of memory to `16G`, you would use this command: `export JAVA_OPTS=-Xmx16G`.
+
+### Full options
+
+```
+Usage: relation-graph [options]
+  --usage  <bool>
+        Print usage and exit
+  --help | -h  <bool>
+        Print help message and exit
+  --ontology-file  <string>
+  --output-file  <string>
+  --mode  <output mode>
+  --property  <string*>
+  --properties-file  <string?>
+  --output-subclasses  <boolean value>
+  --reflexive-subclasses  <boolean value>
+  --equivalence-as-subclass  <boolean value>
+```
 
 ## Build
 Install `sbt` (Scala Build Tool) on your system. For Mac OS X, it is easily done using [Homebrew](http://brew.sh):  `brew install sbt`. `sbt` requires a working Java installation, but you do not need to otherwise install Scala.
