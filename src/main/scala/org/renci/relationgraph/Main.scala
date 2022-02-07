@@ -106,9 +106,10 @@ object Main extends ZCaseApp[Config] {
   def traverse(specifiedProperties: Set[AtomicConcept], properties: Hierarchy, classes: Hierarchy, queue: Queue[Restriction], activeRestrictions: Ref[Int], seenRef: Ref[Map[AtomicConcept, Set[AtomicConcept]]]): UIO[Unit] = {
     val descendProperties = specifiedProperties.isEmpty
     val queryProperties = if (descendProperties) properties.subclasses.getOrElse(Top, Set.empty) - Bottom else specifiedProperties
-    ZIO.foreachPar_(queryProperties) { subprop =>
+    if (queryProperties.nonEmpty) ZIO.foreachPar_(queryProperties) { subprop =>
       traverseProperty(subprop, classes, queue, activeRestrictions, seenRef)
     }
+    else queue.shutdown
   }
 
   def traverseProperty(property: AtomicConcept, classes: Hierarchy, queue: Queue[Restriction], activeRestrictions: Ref[Int], seenRef: Ref[Map[AtomicConcept, Set[AtomicConcept]]]): UIO[Unit] = {
