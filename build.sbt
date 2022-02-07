@@ -1,4 +1,6 @@
 enablePlugins(JavaAppPackaging)
+enablePlugins(BuildInfoPlugin)
+enablePlugins(GitVersioning)
 
 organization := "org.renci"
 
@@ -15,6 +17,14 @@ scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8")
 javaOptions += "-Xmx8G"
 
 testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+
+val gitCommitString = SettingKey[String]("gitCommit")
+
+gitCommitString := git.gitHeadCommit.value.getOrElse("Not Set")
+
+buildInfoKeys := Seq[BuildInfoKey](name, version, scalaVersion, sbtVersion, gitCommitString)
+
+buildInfoPackage := "org.renci.relationgraph"
 
 val zioVersion = "1.0.13"
 
