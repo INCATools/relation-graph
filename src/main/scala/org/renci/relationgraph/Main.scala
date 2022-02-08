@@ -13,6 +13,8 @@ import org.semanticweb.owlapi.apibinding.OWLFunctionalSyntaxFactory.{OWLNothing,
 import org.semanticweb.owlapi.apibinding.OWLManager
 import org.semanticweb.owlapi.model._
 import org.semanticweb.owlapi.model.parameters.Imports
+import scribe.Level
+import scribe.filter.{packageName, select}
 import zio._
 import zio.blocking._
 import zio.stream._
@@ -38,6 +40,14 @@ object Main extends ZCaseApp[Config] {
   private val OWLOntology = OWL2.Ontology.asNode
 
   override def run(config: Config, arg: RemainingArgs): ZIO[ZEnv, Nothing, ExitCode] = {
+    val configureLogging = ZIO.succeed {
+      scribe.Logger.root
+        .clearHandlers()
+        .clearModifiers()
+        .withModifier(select(packageName("org.renci.relationgraph")).boosted(Level.Info, Level.Warn))
+        .withHandler(minimumLevel = Some(if (config.verbose) Level.Info else Level.Warn))
+        .replace()
+    }
     val program = createStreamRDF(config.outputFile).use { rdfWriter =>
       for {
         fileProperties <- config.propertiesFile.map(readPropertiesFile).getOrElse(ZIO.succeed(Set.empty[AtomicConcept]))
@@ -45,7 +55,7 @@ object Main extends ZCaseApp[Config] {
         ontology <- loadOntology(config.ontologyFile)
         whelkOntology = Bridge.ontologyToAxioms(ontology)
         _ <- ZIO.succeed(scribe.info("Running reasoner"))
-        whelk = Reasoner.assert(whelkOntology)
+        whelk = Reasoner.assert(whelkOntology, disableBottom = config.disableOwlNothing.bool)
         indexedWhelk = IndexedReasonerState(whelk)
         _ <- ZIO.succeed(scribe.info("Done running reasoner"))
         _ <- ZIO.fail(new Exception("Ontology is incoherent; please correct unsatisfiable classes.")).when(isIncoherent(whelk))
@@ -60,7 +70,12 @@ object Main extends ZCaseApp[Config] {
         _ <- ZIO.succeed(scribe.info(s"Computed relations in ${(stop - start) / 1000.0}s"))
       } yield ()
     }
-    program.exitCode
+    configureLogging *>
+      program.as(ExitCode.success)
+        .catchAll { e =>
+          if (config.verbose) ZIO.succeed(e.printStackTrace()).as(ExitCode.failure)
+          else ZIO.succeed(scribe.error(e.getMessage)).as(ExitCode.failure)
+        }
   }
 
   def computeRelations(ontology: OWLOntology, whelk: IndexedReasonerState, specifiedProperties: Set[AtomicConcept], outputSubclasses: Boolean, reflexiveSubclasses: Boolean, equivalenceAsSubclass: Boolean, mode: Config.OutputMode): UStream[TriplesGroup] = {
