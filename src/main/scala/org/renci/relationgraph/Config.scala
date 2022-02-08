@@ -11,9 +11,9 @@ final case class Config(ontologyFile: String,
                         propertiesFile: Option[String],
                         outputSubclasses: BoolValue = FalseValue,
                         reflexiveSubclasses: BoolValue = TrueValue,
-                        equivalenceAsSubclass: BoolValue = TrueValue) {
-
-}
+                        equivalenceAsSubclass: BoolValue = TrueValue,
+                        disableOwlNothing: BoolValue = FalseValue,
+                        verbose: Boolean = false)
 
 object Config {
 
