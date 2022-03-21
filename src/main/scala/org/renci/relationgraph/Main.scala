@@ -62,7 +62,7 @@ object Main extends ZCaseApp[Config] {
         _ <- effectBlockingIO(rdfWriter.triple(Triple.create(NodeFactory.createBlankNode("redundant"), RDFType, OWLOntology)))
           .when(config.mode == OWLMode)
         start <- ZIO.succeed(System.currentTimeMillis())
-        triplesStream = computeRelations(ontology, indexedWhelk, specifiedProperties, config.outputSubclasses.bool, config.reflexiveSubclasses.bool, config.equivalenceAsSubclass.bool, config.mode)
+        triplesStream = computeRelations(ontology, indexedWhelk, specifiedProperties, config.outputSubclasses.bool, config.reflexiveSubclasses.bool, config.equivalenceAsSubclass.bool, config.outputClasses.bool, config.outputIndividuals.bool, config.mode)
         _ <- triplesStream.foreach {
           case TriplesGroup(triples) => ZIO.effect(triples.foreach(rdfWriter.triple))
         }
@@ -78,18 +78,18 @@ object Main extends ZCaseApp[Config] {
         }
   }
 
-  def computeRelations(ontology: OWLOntology, whelk: IndexedReasonerState, specifiedProperties: Set[AtomicConcept], outputSubclasses: Boolean, reflexiveSubclasses: Boolean, equivalenceAsSubclass: Boolean, mode: Config.OutputMode): UStream[TriplesGroup] = {
+  def computeRelations(ontology: OWLOntology, whelk: IndexedReasonerState, specifiedProperties: Set[AtomicConcept], outputSubclasses: Boolean, reflexiveSubclasses: Boolean, equivalenceAsSubclass: Boolean, outputClasses: Boolean, outputIndividuals: Boolean, mode: Config.OutputMode): UStream[TriplesGroup] = {
     val classes = classHierarchy(whelk.state)
     val properties = propertyHierarchy(ontology)
     val classesTasks = if (outputSubclasses) {
-      allClasses(ontology).map(c => ZIO.succeed(processSuperclasses(c, whelk.state, reflexiveSubclasses, equivalenceAsSubclass)))
+      allClasses(ontology).map(c => ZIO.succeed(processSubclasses(c, whelk.state, reflexiveSubclasses, equivalenceAsSubclass, outputClasses, outputIndividuals)))
     } else Stream.empty
     val streamZ = for {
       queue <- Queue.unbounded[Restriction]
       activeRestrictions <- Ref.make(0)
       seenRef <- Ref.make(Map.empty[AtomicConcept, Set[AtomicConcept]])
       _ <- traverse(specifiedProperties, properties, classes, queue, activeRestrictions, seenRef)
-      restrictionsStream = Stream.fromQueue(queue).map(r => processRestrictionAndExtendQueue(r, properties, classes, whelk, mode, specifiedProperties.isEmpty, queue, activeRestrictions, seenRef))
+      restrictionsStream = Stream.fromQueue(queue).map(r => processRestrictionAndExtendQueue(r, properties, classes, whelk, mode, specifiedProperties.isEmpty, outputClasses, outputIndividuals, queue, activeRestrictions, seenRef))
       allTasks = classesTasks ++ restrictionsStream
     } yield allTasks.mapMParUnordered(JRuntime.getRuntime.availableProcessors)(identity)
     Stream.unwrap(streamZ)
@@ -141,8 +141,8 @@ object Main extends ZCaseApp[Config] {
     } yield ()
   }
 
-  def processRestrictionAndExtendQueue(restriction: Restriction, properties: Hierarchy, classes: Hierarchy, whelk: IndexedReasonerState, mode: Config.OutputMode, descendProperties: Boolean, queue: Queue[Restriction], activeRestrictions: Ref[Int], seenRef: Ref[Map[AtomicConcept, Set[AtomicConcept]]]): UIO[TriplesGroup] = {
-    val triples = processRestriction(restriction, whelk, mode)
+  def processRestrictionAndExtendQueue(restriction: Restriction, properties: Hierarchy, classes: Hierarchy, whelk: IndexedReasonerState, mode: Config.OutputMode, descendProperties: Boolean, outputClasses: Boolean, outputIndividuals: Boolean, queue: Queue[Restriction], activeRestrictions: Ref[Int], seenRef: Ref[Map[AtomicConcept, Set[AtomicConcept]]]): UIO[TriplesGroup] = {
+    val triples = processRestriction(restriction, whelk, mode, outputClasses, outputIndividuals)
     for {
       directFillerSubclassesRestrictions <- if (triples.redundant.nonEmpty) seenRef.modify { seen =>
         val propertyConcept = AtomicConcept(restriction.property.id)
@@ -170,21 +170,30 @@ object Main extends ZCaseApp[Config] {
     } yield triples
   }
 
-  def processRestriction(restriction: Restriction, whelk: IndexedReasonerState, mode: Config.OutputMode): TriplesGroup = {
-    val subclasses = queryExistentialSubclasses(restriction, whelk)
-    if (subclasses.nonEmpty) {
-      val predicate = NodeFactory.createURI(restriction.property.id)
-      val target = NodeFactory.createURI(restriction.filler.id)
-      val outputTriples = mode match {
-        case RDFMode => subclasses.map(sc => Triple.create(NodeFactory.createURI(sc.id), predicate, target))
-        case OWLMode => subclasses.flatMap(sc => owlTriples(NodeFactory.createURI(sc.id), predicate, target))
+  def processRestriction(restriction: Restriction, whelk: IndexedReasonerState, mode: Config.OutputMode, outputClasses: Boolean, outputIndividuals: Boolean): TriplesGroup = {
+    val subConcepts = queryExistentialSubclasses(restriction, whelk)
+    val subclasses = if (outputClasses) (subConcepts - Bottom).collect { case AtomicConcept(id) => id } else Set.empty[String]
+    val instances = if (outputIndividuals) subConcepts.collect { case Nominal(Individual(id)) => id } else Set.empty[String]
+    val predicate = NodeFactory.createURI(restriction.property.id)
+    val target = NodeFactory.createURI(restriction.filler.id)
+    val subclassTriples = subclasses.flatMap { id =>
+      mode match {
+        case RDFMode => Set(Triple.create(NodeFactory.createURI(id), predicate, target))
+        case OWLMode => owlTriples(NodeFactory.createURI(id), predicate, target, RDFSSubClassOf)
       }
-      TriplesGroup(outputTriples)
-    } else TriplesGroup.empty
+    }
+    val instanceTriples = instances.flatMap { id =>
+      mode match {
+        case RDFMode => Set(Triple.create(NodeFactory.createURI(id), predicate, target))
+        case OWLMode => owlTriples(NodeFactory.createURI(id), predicate, target, RDFType)
+      }
+    }
+    val outputTriples = subclassTriples ++ instanceTriples
+    TriplesGroup(outputTriples)
   }
 
   // This is a faster way to compute these than the standard Whelk algorithm
-  def queryExistentialSubclasses(restriction: Restriction, whelk: IndexedReasonerState): Set[AtomicConcept] = {
+  def queryExistentialSubclasses(restriction: Restriction, whelk: IndexedReasonerState): Set[Concept] = {
     val er = ExistentialRestriction(restriction.property, restriction.filler)
     val rs = whelk.reverseRoleHierarchy.getOrElse(er.role, Set.empty)
     val cs = whelk.state.closureSubsBySuperclass.getOrElse(er.concept, Set.empty)
@@ -193,7 +202,7 @@ object Main extends ZCaseApp[Config] {
       target <- validTargets
       (r, es) <- whelk.linksByTargetList.getOrElse(target, Map.empty)
       if rs(r)
-    } yield es.iterator).flatten.to(Set).collect { case x: AtomicConcept => x } - Bottom
+    } yield es.iterator).flatten.to(Set)
   }
 
   def classHierarchy(reasoner: ReasonerState): Hierarchy = {
@@ -223,37 +232,45 @@ object Main extends ZCaseApp[Config] {
     classHierarchy(whelk)
   }
 
-  def processSuperclasses(cls: OWLClass, whelk: ReasonerState, reflexiveSubclasses: Boolean, equivalenceAsSubclass: Boolean): TriplesGroup = {
-    val subject = NodeFactory.createURI(cls.getIRI.toString)
+  def processSubclasses(cls: OWLClass, whelk: ReasonerState, reflexiveSubclasses: Boolean, equivalenceAsSubclass: Boolean, outputClasses: Boolean, outputIndividuals: Boolean): TriplesGroup = {
+    val obj = NodeFactory.createURI(cls.getIRI.toString)
     val concept = AtomicConcept(cls.getIRI.toString)
-    val allSuperclasses = (whelk.closureSubsBySubclass.getOrElse(concept, Set.empty) - BuiltIn.Top)
-      .collect { case ac @ AtomicConcept(_) => ac }
-    if (allSuperclasses(BuiltIn.Bottom)) TriplesGroup.empty //unsatisfiable
-    else {
-      val (equivs, _) = whelk.directlySubsumedBy(concept)
-      val adjustedEquivs = if (reflexiveSubclasses) equivs + concept else equivs - concept
-      val equivalentClassTriples = if (equivalenceAsSubclass)
-        adjustedEquivs.map(c => Triple.create(subject, RDFSSubClassOf, NodeFactory.createURI(c.id)))
-      else
-        adjustedEquivs.map(c => Triple.create(subject, OWLEquivalentClass, NodeFactory.createURI(c.id)))
-      val adjustedSuperclasses = if (reflexiveSubclasses) allSuperclasses + concept else allSuperclasses - concept
-      val outputTriples = if (equivalenceAsSubclass)
-        adjustedSuperclasses.map(c => Triple.create(subject, RDFSSubClassOf, NodeFactory.createURI(c.id)))
-      else {
-        val superclassesMinusEquiv = adjustedSuperclasses -- adjustedEquivs
-        superclassesMinusEquiv.map(c => Triple.create(subject, RDFSSubClassOf, NodeFactory.createURI(c.id))) ++
-          equivalentClassTriples
+    val subConcepts = (whelk.closureSubsBySuperclass.getOrElse(concept, Set.empty) - BuiltIn.Bottom)
+    val individualsTriples = if (outputIndividuals) {
+      subConcepts.collect { case Nominal(Individual(id)) =>
+        Triple.create(NodeFactory.createURI(id), RDFType, obj)
       }
-      TriplesGroup(outputTriples)
-    }
+    } else Set.empty[Triple]
+    val classesTriples = if (outputClasses) {
+      val allSubclasses = subConcepts.collect { case ac @ AtomicConcept(_) => ac }
+      val (equivs, _) = whelk.directlySubsumedBy(concept)
+      val unsatisfiable = equivs(BuiltIn.Bottom)
+      if (unsatisfiable) Set.empty[Triple]
+      else {
+        val adjustedEquivs = if (reflexiveSubclasses) equivs + concept else equivs - concept
+        val equivalentClassTriples = if (equivalenceAsSubclass)
+          adjustedEquivs.map(c => Triple.create(NodeFactory.createURI(c.id), RDFSSubClassOf, obj))
+        else
+          adjustedEquivs.map(c => Triple.create(NodeFactory.createURI(c.id), OWLEquivalentClass, obj))
+        val adjustedSubclasses = if (reflexiveSubclasses) allSubclasses + concept else allSubclasses - concept
+        if (equivalenceAsSubclass)
+          adjustedSubclasses.map(c => Triple.create(NodeFactory.createURI(c.id), RDFSSubClassOf, obj))
+        else {
+          val subclassesMinusEquiv = adjustedSubclasses -- adjustedEquivs
+          subclassesMinusEquiv.map(c => Triple.create(NodeFactory.createURI(c.id), RDFSSubClassOf, obj)) ++ equivalentClassTriples
+        }
+      }
+    } else Set.empty[Triple]
+    val outputTriples = classesTriples ++ individualsTriples
+    TriplesGroup(outputTriples)
   }
 
-  def owlTriples(subj: Node, pred: Node, obj: Node): Set[Triple] = {
+  def owlTriples(subj: Node, pred: Node, obj: Node, relation: Node): Set[Triple] = {
     val hash = MessageDigest.getInstance("SHA-256").digest(s"$subj$pred$obj".getBytes(StandardCharsets.UTF_8))
     val id = Base64.getEncoder.encodeToString(hash)
     val restrictionNode = NodeFactory.createBlankNode(id)
     Set(
-      Triple.create(subj, RDFSSubClassOf, restrictionNode),
+      Triple.create(subj, relation, restrictionNode),
       Triple.create(restrictionNode, RDFType, OWLRestriction),
       Triple.create(restrictionNode, OWLOnProperty, pred),
       Triple.create(restrictionNode, OWLSomeValuesFrom, obj)

@@ -26,7 +26,7 @@ object TestRelationGraph extends DefaultRunnableSpec {
           whelkOntology = Bridge.ontologyToAxioms(ontology)
           whelk = Reasoner.assert(whelkOntology)
           indexedWhelk = IndexedReasonerState(whelk)
-          resultsStream = Main.computeRelations(ontology, indexedWhelk, Set.empty, true, false, false, Config.RDFMode)
+          resultsStream = Main.computeRelations(ontology, indexedWhelk, Set.empty, true, false, false, true, false, Config.RDFMode)
           results <- resultsStream.runCollect
           triples <- ZIO.fromOption(results.reduceOption((left, right) => TriplesGroup(left.redundant ++ right.redundant)))
           TriplesGroup(redundant) = triples
@@ -45,7 +45,7 @@ object TestRelationGraph extends DefaultRunnableSpec {
           whelkOntology = Bridge.ontologyToAxioms(ontology)
           whelk = Reasoner.assert(whelkOntology)
           indexedWhelk = IndexedReasonerState(whelk)
-          resultsStream = Main.computeRelations(ontology, indexedWhelk, Set.empty, true, false, false, Config.RDFMode)
+          resultsStream = Main.computeRelations(ontology, indexedWhelk, Set.empty, true, false, false, true, false, Config.RDFMode)
           results <- resultsStream.runCollect
           triples <- ZIO.fromOption(results.reduceOption((left, right) => TriplesGroup(left.redundant ++ right.redundant)))
           TriplesGroup(redundant) = triples
