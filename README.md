@@ -27,18 +27,30 @@ Usage: relation-graph [options]
         Print help message and exit
   --version 
         Print release info and exit
-  --ontology-file  <string>
-  --output-file  <string>
-  --mode  <output mode>
-  --property  <string*>
-  --properties-file  <string?>
-  --output-subclasses  <boolean value>
-  --reflexive-subclasses  <boolean value>
-  --equivalence-as-subclass  <boolean value>
-  --output-classes  <boolean value>
-  --output-individuals  <boolean value>
-  --disable-owl-nothing  <boolean value>
+  --ontology-file  <filename>
+        Input OWL ontology
+  --output-file  <filename>
+        File to stream output triples to.
+  --mode  <RDF|OWL>
+        Configure style of triples to be output. RDF mode is the default; each existential relation is collapsed to a single direct triple.
+  --property  <IRI>
+        Property to restrict output relations to. Provide option multiple times for multiple properties.
+  --properties-file  <filename>
+        File containing line-separated property IRIs to restrict output relations to.
+  --output-subclasses  <bool>
+        Include entailed rdfs:subClassOf or owl:equivalentClass relations in output (default false)
+  --reflexive-subclasses  <bool>
+        When outputting rdfs:subClassOf, include relations to self for every class (default true)
+  --equivalence-as-subclass  <bool>
+        When outputting equivalent classes, output reciprocal rdfs:subClassOf triples instead of owl:equivalentClass triples (default true)
+  --output-classes  <bool>
+        Output any triples where classes are subjects (default true)
+  --output-individuals  <bool>
+        Output triples where individuals are subjects, with classes as objects (default false)
+  --disable-owl-nothing  <bool>
+        Disable inference of unsatisfiable classes by the whelk reasoner (default false)
   --verbose  <bool>
+        Set log level to INFO
 ```
 
 ## Build
