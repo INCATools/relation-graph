@@ -12,6 +12,8 @@ final case class Config(ontologyFile: String,
                         outputSubclasses: BoolValue = FalseValue,
                         reflexiveSubclasses: BoolValue = TrueValue,
                         equivalenceAsSubclass: BoolValue = TrueValue,
+                        outputClasses: BoolValue = TrueValue,
+                        outputIndividuals: BoolValue = FalseValue,
                         disableOwlNothing: BoolValue = FalseValue,
                         verbose: Boolean = false)
 
