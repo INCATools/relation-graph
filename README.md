@@ -25,6 +25,8 @@ Usage: relation-graph [options]
         Print usage and exit
   --help | -h  <bool>
         Print help message and exit
+  --version 
+        Print release info and exit
   --ontology-file  <string>
   --output-file  <string>
   --mode  <output mode>
@@ -33,6 +35,10 @@ Usage: relation-graph [options]
   --output-subclasses  <boolean value>
   --reflexive-subclasses  <boolean value>
   --equivalence-as-subclass  <boolean value>
+  --output-classes  <boolean value>
+  --output-individuals  <boolean value>
+  --disable-owl-nothing  <boolean value>
+  --verbose  <bool>
 ```
 
 ## Build
