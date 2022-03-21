@@ -1,21 +1,49 @@
 package org.renci.relationgraph
 
+import caseapp._
 import caseapp.core.Error.MalformedValue
 import caseapp.core.argparser.{ArgParser, SimpleArgParser}
 import org.renci.relationgraph.Config.{BoolValue, FalseValue, TrueValue}
 
-final case class Config(ontologyFile: String,
-                        outputFile: String,
-                        mode: Config.OutputMode = Config.RDFMode,
-                        property: List[String] = Nil,
-                        propertiesFile: Option[String],
-                        outputSubclasses: BoolValue = FalseValue,
-                        reflexiveSubclasses: BoolValue = TrueValue,
-                        equivalenceAsSubclass: BoolValue = TrueValue,
-                        outputClasses: BoolValue = TrueValue,
-                        outputIndividuals: BoolValue = FalseValue,
-                        disableOwlNothing: BoolValue = FalseValue,
-                        verbose: Boolean = false)
+@AppName("relation-graph")
+@ProgName("relation-graph")
+final case class Config(
+                         @HelpMessage("Input OWL ontology")
+                         @ValueDescription("filename")
+                         ontologyFile: String,
+                         @HelpMessage("File to stream output triples to.")
+                         @ValueDescription("filename")
+                         outputFile: String,
+                         @HelpMessage("Configure style of triples to be output. RDF mode is the default; each existential relation is collapsed to a single direct triple.")
+                         @ValueDescription("RDF|OWL")
+                         mode: Config.OutputMode = Config.RDFMode,
+                         @HelpMessage("Property to restrict output relations to. Provide option multiple times for multiple properties.")
+                         @ValueDescription("IRI")
+                         property: List[String] = Nil,
+                         @HelpMessage("File containing line-separated property IRIs to restrict output relations to.")
+                         @ValueDescription("filename")
+                         propertiesFile: Option[String],
+                         @HelpMessage("Include entailed rdfs:subClassOf or owl:equivalentClass relations in output (default false)")
+                         @ValueDescription("bool")
+                         outputSubclasses: BoolValue = FalseValue,
+                         @HelpMessage("When outputting rdfs:subClassOf, include relations to self for every class (default true)")
+                         @ValueDescription("bool")
+                         reflexiveSubclasses: BoolValue = TrueValue,
+                         @HelpMessage("When outputting equivalent classes, output reciprocal rdfs:subClassOf triples instead of owl:equivalentClass triples (default true)")
+                         @ValueDescription("bool")
+                         equivalenceAsSubclass: BoolValue = TrueValue,
+                         @HelpMessage("Output any triples where classes are subjects (default true)")
+                         @ValueDescription("bool")
+                         outputClasses: BoolValue = TrueValue,
+                         @HelpMessage("Output triples where individuals are subjects, with classes as objects (default false)")
+                         @ValueDescription("bool")
+                         outputIndividuals: BoolValue = FalseValue,
+                         @HelpMessage("Disable inference of unsatisfiable classes by the whelk reasoner (default false)")
+                         @ValueDescription("bool")
+                         disableOwlNothing: BoolValue = FalseValue,
+                         @HelpMessage("Set log level to INFO")
+                         @ValueDescription("bool")
+                         verbose: Boolean = false)
 
 object Config {
 
