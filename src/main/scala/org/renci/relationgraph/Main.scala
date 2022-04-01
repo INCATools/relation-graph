@@ -15,8 +15,8 @@ import org.semanticweb.owlapi.model._
 import org.semanticweb.owlapi.model.parameters.Imports
 import scribe.Level
 import scribe.filter.{packageName, select}
+import zio.ZIO.attemptBlockingIO
 import zio._
-import zio.blocking._
 import zio.stream._
 
 import java.io.{File, FileOutputStream}
@@ -24,6 +24,7 @@ import java.lang.{Runtime => JRuntime}
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.Base64
+import java.util.concurrent.TimeUnit
 import scala.io.Source
 import scala.jdk.CollectionConverters._
 
@@ -48,27 +49,30 @@ object Main extends ZCaseApp[Config] {
         .withHandler(minimumLevel = Some(if (config.verbose) Level.Info else Level.Warn))
         .replace()
     }
-    val program = createStreamRDF(config.outputFile).use { rdfWriter =>
-      for {
-        fileProperties <- config.propertiesFile.map(readPropertiesFile).getOrElse(ZIO.succeed(Set.empty[AtomicConcept]))
-        specifiedProperties = fileProperties ++ config.property.map(prop => AtomicConcept(prop)).to(Set)
-        ontology <- loadOntology(config.ontologyFile)
-        whelkOntology = Bridge.ontologyToAxioms(ontology)
-        _ <- ZIO.succeed(scribe.info("Running reasoner"))
-        whelk = Reasoner.assert(whelkOntology, disableBottom = config.disableOwlNothing.bool)
-        indexedWhelk = IndexedReasonerState(whelk)
-        _ <- ZIO.succeed(scribe.info("Done running reasoner"))
-        _ <- ZIO.fail(new Exception("Ontology is incoherent; please correct unsatisfiable classes.")).when(isIncoherent(whelk))
-        _ <- effectBlockingIO(rdfWriter.triple(Triple.create(NodeFactory.createBlankNode("redundant"), RDFType, OWLOntology)))
-          .when(config.mode == OWLMode)
-        start <- ZIO.succeed(System.currentTimeMillis())
-        triplesStream = computeRelations(ontology, indexedWhelk, specifiedProperties, config.outputSubclasses.bool, config.reflexiveSubclasses.bool, config.equivalenceAsSubclass.bool, config.outputClasses.bool, config.outputIndividuals.bool, config.mode)
-        _ <- triplesStream.foreach {
-          case TriplesGroup(triples) => ZIO.effect(triples.foreach(rdfWriter.triple))
-        }
-        stop <- ZIO.succeed(System.currentTimeMillis())
-        _ <- ZIO.succeed(scribe.info(s"Computed relations in ${(stop - start) / 1000.0}s"))
-      } yield ()
+
+    val program = ZIO.scoped {
+      createStreamRDF(config.outputFile).flatMap { rdfWriter =>
+        for {
+          fileProperties <- config.propertiesFile.map(readPropertiesFile).getOrElse(ZIO.succeed(Set.empty[AtomicConcept]))
+          specifiedProperties = fileProperties ++ config.property.map(prop => AtomicConcept(prop)).to(Set)
+          ontology <- loadOntology(config.ontologyFile)
+          whelkOntology = Bridge.ontologyToAxioms(ontology)
+          _ <- ZIO.succeed(scribe.info("Running reasoner"))
+          whelk = Reasoner.assert(whelkOntology, disableBottom = config.disableOwlNothing.bool)
+          indexedWhelk = IndexedReasonerState(whelk)
+          _ <- ZIO.succeed(scribe.info("Done running reasoner"))
+          _ <- ZIO.fail(new Exception("Ontology is incoherent; please correct unsatisfiable classes.")).when(isIncoherent(whelk))
+          _ <- attemptBlockingIO(rdfWriter.triple(Triple.create(NodeFactory.createBlankNode("redundant"), RDFType, OWLOntology)))
+            .when(config.mode == OWLMode)
+          start <- Clock.currentTime(TimeUnit.MILLISECONDS)
+          triplesStream = computeRelations(ontology, indexedWhelk, specifiedProperties, config.outputSubclasses.bool, config.reflexiveSubclasses.bool, config.equivalenceAsSubclass.bool, config.outputClasses.bool, config.outputIndividuals.bool, config.mode)
+          _ <- triplesStream.foreach {
+            case TriplesGroup(triples) => ZIO.attempt(triples.foreach(rdfWriter.triple))
+          }
+          stop <- Clock.currentTime(TimeUnit.MILLISECONDS)
+          _ <- ZIO.succeed(scribe.info(s"Computed relations in ${(stop - start) / 1000.0}s"))
+        } yield ()
+      }
     }
     configureLogging *>
       program.as(ExitCode.success)
@@ -81,58 +85,58 @@ object Main extends ZCaseApp[Config] {
   def computeRelations(ontology: OWLOntology, whelk: IndexedReasonerState, specifiedProperties: Set[AtomicConcept], outputSubclasses: Boolean, reflexiveSubclasses: Boolean, equivalenceAsSubclass: Boolean, outputClasses: Boolean, outputIndividuals: Boolean, mode: Config.OutputMode): UStream[TriplesGroup] = {
     val classes = classHierarchy(whelk.state)
     val properties = propertyHierarchy(ontology)
+    val allProperties = properties.subclasses.keySet.map(c => Role(c.id))
     val classesTasks = if (outputSubclasses) {
       allClasses(ontology).map(c => ZIO.succeed(processSubclasses(c, whelk.state, reflexiveSubclasses, equivalenceAsSubclass, outputClasses, outputIndividuals)))
     } else Stream.empty
     val streamZ = for {
       queue <- Queue.unbounded[Restriction]
       activeRestrictions <- Ref.make(0)
-      seenRef <- Ref.make(Map.empty[AtomicConcept, Set[AtomicConcept]])
-      _ <- traverse(specifiedProperties, properties, classes, queue, activeRestrictions, seenRef)
-      restrictionsStream = Stream.fromQueue(queue).map(r => processRestrictionAndExtendQueue(r, properties, classes, whelk, mode, specifiedProperties.isEmpty, outputClasses, outputIndividuals, queue, activeRestrictions, seenRef))
+      seenRefs <- ZIO.foreach(allProperties)(p => Ref.make(Set.empty[AtomicConcept]).map(p -> _)).map(_.toMap)
+      _ <- traverse(specifiedProperties, properties, classes, queue, activeRestrictions, seenRefs)
+      restrictionsStream = Stream.fromQueue(queue).map(r => processRestrictionAndExtendQueue(r, properties, classes, whelk, mode, specifiedProperties.isEmpty, outputClasses, outputIndividuals, queue, activeRestrictions, seenRefs))
       allTasks = classesTasks ++ restrictionsStream
-    } yield allTasks.mapMParUnordered(JRuntime.getRuntime.availableProcessors)(identity)
+    } yield allTasks.mapZIOParUnordered(JRuntime.getRuntime.availableProcessors)(identity)
     Stream.unwrap(streamZ)
   }
 
-  def readPropertiesFile(file: String): ZIO[Blocking, Throwable, Set[AtomicConcept]] =
-    effectBlocking(Source.fromFile(file, "utf-8")).bracketAuto { source =>
-      effectBlocking(source.getLines().map(_.trim).filter(_.nonEmpty).map(line => AtomicConcept(line)).to(Set))
+  def readPropertiesFile(file: String): ZIO[Any, Throwable, Set[AtomicConcept]] =
+    ZIO.attemptBlocking(Source.fromFile(file, "utf-8")).acquireReleaseWithAuto { source =>
+      ZIO.attemptBlocking(source.getLines().map(_.trim).filter(_.nonEmpty).map(line => AtomicConcept(line)).to(Set))
     }
 
   def loadOntology(path: String): Task[OWLOntology] = for {
-    manager <- ZIO.effect(OWLManager.createOWLOntologyManager())
-    ontology <- ZIO.effect(manager.loadOntologyFromOntologyDocument(new File(path)))
+    manager <- ZIO.attempt(OWLManager.createOWLOntologyManager())
+    ontology <- ZIO.attemptBlocking(manager.loadOntologyFromOntologyDocument(new File(path)))
   } yield ontology
 
-  def createStreamRDF(path: String): TaskManaged[StreamRDF] = for {
-    outputStream <- Managed.fromAutoCloseable(ZIO.effect(new FileOutputStream(new File(path))))
-    rdfWriter <- Managed.make {
-      ZIO.effect {
+  def createStreamRDF(path: String): ZIO[Scope, Throwable, StreamRDF] = {
+    ZIO.acquireRelease(ZIO.attempt(new FileOutputStream(new File(path))))(stream => ZIO.succeed(stream.close())).flatMap { outputStream =>
+      ZIO.acquireRelease(ZIO.attempt {
         val stream = StreamRDFWriter.getWriterStream(outputStream, RDFFormat.TURTLE_FLAT, null)
         stream.start()
         stream
-      }
-    }(stream => ZIO.succeed(stream.finish()))
-  } yield rdfWriter
+      })(stream => ZIO.succeed(stream.finish()))
+    }
+  }
 
   def allClasses(ont: OWLOntology): ZStream[Any, Nothing, OWLClass] = Stream.fromIterable(ont.getClassesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLThing - OWLNothing)
 
-  def traverse(specifiedProperties: Set[AtomicConcept], properties: Hierarchy, classes: Hierarchy, queue: Queue[Restriction], activeRestrictions: Ref[Int], seenRef: Ref[Map[AtomicConcept, Set[AtomicConcept]]]): UIO[Unit] = {
+  def traverse(specifiedProperties: Set[AtomicConcept], properties: Hierarchy, classes: Hierarchy, queue: Queue[Restriction], activeRestrictions: Ref[Int], seenRefs: Map[Role, Ref[Set[AtomicConcept]]]): UIO[Unit] = {
     val descendProperties = specifiedProperties.isEmpty
     val queryProperties = if (descendProperties) properties.subclasses.getOrElse(Top, Set.empty) - Bottom else specifiedProperties
-    if (queryProperties.nonEmpty) ZIO.foreachPar_(queryProperties) { subprop =>
-      traverseProperty(subprop, classes, queue, activeRestrictions, seenRef)
+    if (queryProperties.nonEmpty) ZIO.foreachParDiscard(queryProperties) { subprop =>
+      traverseProperty(subprop, classes, queue, activeRestrictions, seenRefs)
     }
     else queue.shutdown
   }
 
-  def traverseProperty(property: AtomicConcept, classes: Hierarchy, queue: Queue[Restriction], activeRestrictions: Ref[Int], seenRef: Ref[Map[AtomicConcept, Set[AtomicConcept]]]): UIO[Unit] = {
+  def traverseProperty(property: AtomicConcept, classes: Hierarchy, queue: Queue[Restriction], activeRestrictions: Ref[Int], seenRefs: Map[Role, Ref[Set[AtomicConcept]]]): UIO[Unit] = {
     val restrictions = (classes.subclasses.getOrElse(Top, Set.empty) - Bottom).map(filler => Restriction(Role(property.id), filler))
+    val propSeenRef = seenRefs(Role(property.id))
     for {
-      _ <- seenRef.update { seen =>
-        val seenForThisProperty = seen.getOrElse(property, Set.empty) ++ restrictions.map(_.filler)
-        seen.updated(property, seenForThisProperty)
+      _ <- propSeenRef.update { seenForThisProperty =>
+        seenForThisProperty ++ restrictions.map(_.filler)
       }
       _ <- activeRestrictions.update(current => current + restrictions.size)
       _ <- queue.offerAll(restrictions).unit
@@ -141,30 +145,34 @@ object Main extends ZCaseApp[Config] {
     } yield ()
   }
 
-  def processRestrictionAndExtendQueue(restriction: Restriction, properties: Hierarchy, classes: Hierarchy, whelk: IndexedReasonerState, mode: Config.OutputMode, descendProperties: Boolean, outputClasses: Boolean, outputIndividuals: Boolean, queue: Queue[Restriction], activeRestrictions: Ref[Int], seenRef: Ref[Map[AtomicConcept, Set[AtomicConcept]]]): UIO[TriplesGroup] = {
+  def processRestrictionAndExtendQueue(restriction: Restriction, properties: Hierarchy, classes: Hierarchy, whelk: IndexedReasonerState, mode: Config.OutputMode, descendProperties: Boolean, outputClasses: Boolean, outputIndividuals: Boolean, queue: Queue[Restriction], activeRestrictions: Ref[Int], seenRefs: Map[Role, Ref[Set[AtomicConcept]]]): UIO[TriplesGroup] = {
     val triples = processRestriction(restriction, whelk, mode, outputClasses, outputIndividuals)
+    val continue = triples.redundant.nonEmpty
     for {
-      directFillerSubclassesRestrictions <- if (triples.redundant.nonEmpty) seenRef.modify { seen =>
-        val propertyConcept = AtomicConcept(restriction.property.id)
-        val seenForThisProperty = seen.getOrElse(propertyConcept, Set.empty)
+      propSeenRef <- ZIO.fromOption(seenRefs.get(restriction.property)).orDieWith(_ => new Exception("A property was encountered that was not in the seen map. This should never happen."))
+      directFillerSubclassesRestrictions <- if (continue) propSeenRef.modify { seenForThisProperty =>
         val subClasses = classes.subclasses.getOrElse(restriction.filler, Set.empty) - Bottom
         val unseenSubClasses = subClasses -- seenForThisProperty
-        val updatedSeen = seen.updated(propertyConcept, seenForThisProperty ++ subClasses)
+        val updatedSeenForThisProperty = seenForThisProperty ++ subClasses
         val newRestrictions = unseenSubClasses.map(c => Restriction(restriction.property, c))
-        if (descendProperties) {
-          val subProperties = properties.subclasses.getOrElse(propertyConcept, Set.empty) - Bottom
-          subProperties.foldLeft((newRestrictions, updatedSeen)) { case ((accRestrictions, accSeen), subProperty) =>
-            val seenClassesForSubProperty = accSeen.getOrElse(subProperty, Set.empty)
-            val updatedRestrictions = if (!seenClassesForSubProperty(restriction.filler))
-              accRestrictions + Restriction(Role(subProperty.id), restriction.filler)
-            else accRestrictions
-            val updatedAccSeen = accSeen.updated(subProperty, seenClassesForSubProperty + restriction.filler)
-            (updatedRestrictions, updatedAccSeen)
-          }
-        } else (newRestrictions, updatedSeen)
+        (newRestrictions, updatedSeenForThisProperty)
       } else ZIO.succeed(Set.empty[Restriction])
-      _ <- activeRestrictions.update(current => current - 1 + directFillerSubclassesRestrictions.size)
-      _ <- queue.offerAll(directFillerSubclassesRestrictions)
+      directSubPropertyRestrictions <- if (continue && descendProperties) {
+        val propertyConcept = AtomicConcept(restriction.property.id)
+        val subProperties = properties.subclasses.getOrElse(propertyConcept, Set.empty) - Bottom
+        ZIO.foreach(subProperties) { subProperty =>
+          val subPropSeenRef = seenRefs(Role(subProperty.id))
+          subPropSeenRef.modify { seenClassesForSubProperty =>
+            val maybeRestriction = if (!seenClassesForSubProperty(restriction.filler))
+              Set(Restriction(Role(subProperty.id), restriction.filler))
+            else Set.empty[Restriction]
+            (maybeRestriction, seenClassesForSubProperty + restriction.filler)
+          }
+        }.map(_.flatten)
+      } else ZIO.succeed(Set.empty[Restriction])
+      newRestrictions = directFillerSubclassesRestrictions ++ directSubPropertyRestrictions
+      _ <- activeRestrictions.update(current => current - 1 + newRestrictions.size)
+      _ <- queue.offerAll(newRestrictions)
       active <- activeRestrictions.get
       _ <- queue.shutdown.when(active < 1)
     } yield triples
@@ -235,7 +243,7 @@ object Main extends ZCaseApp[Config] {
   def processSubclasses(cls: OWLClass, whelk: ReasonerState, reflexiveSubclasses: Boolean, equivalenceAsSubclass: Boolean, outputClasses: Boolean, outputIndividuals: Boolean): TriplesGroup = {
     val obj = NodeFactory.createURI(cls.getIRI.toString)
     val concept = AtomicConcept(cls.getIRI.toString)
-    val subConcepts = (whelk.closureSubsBySuperclass.getOrElse(concept, Set.empty) - BuiltIn.Bottom)
+    val subConcepts = whelk.closureSubsBySuperclass.getOrElse(concept, Set.empty) - BuiltIn.Bottom
     val individualsTriples = if (outputIndividuals) {
       subConcepts.collect { case Nominal(Individual(id)) =>
         Triple.create(NodeFactory.createURI(id), RDFType, obj)
