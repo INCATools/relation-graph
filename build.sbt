@@ -26,7 +26,7 @@ buildInfoKeys := Seq[BuildInfoKey](name, version, scalaVersion, sbtVersion, gitC
 
 buildInfoPackage := "org.renci.relationgraph"
 
-val zioVersion = "2.0.0-RC3"
+val zioVersion = "2.0.0-RC5"
 
 libraryDependencies ++= {
   Seq(
