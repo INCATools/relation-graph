@@ -5,6 +5,7 @@ lazy val commonSettings = Seq(
   organization := "org.geneontology",
   version := "2.2.0",
   licenses := Seq("MIT license" -> url("https://opensource.org/licenses/MIT")),
+  homepage := Some(url("https://github.com/balhoff/relation-graph")),
   scalaVersion := "2.13.8",
   scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8"),
   javaOptions += "-Xmx8G"
@@ -75,3 +76,5 @@ lazy val cli = project
     buildInfoKeys := Seq[BuildInfoKey](name, version, scalaVersion, sbtVersion, gitCommitString),
     buildInfoPackage := "org.renci.relationgraph"
   )
+
+Global / useGpg := false
