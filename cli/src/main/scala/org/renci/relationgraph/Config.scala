@@ -4,6 +4,7 @@ import caseapp._
 import caseapp.core.Error.MalformedValue
 import caseapp.core.argparser.{ArgParser, SimpleArgParser}
 import org.renci.relationgraph.Config.{BoolValue, FalseValue, TrueValue}
+import org.renci.relationgraph.RelationGraph.Config.{OWLMode, OutputMode, RDFMode}
 
 @AppName("relation-graph")
 @ProgName("relation-graph")
@@ -16,7 +17,7 @@ final case class Config(
                          outputFile: String,
                          @HelpMessage("Configure style of triples to be output. RDF mode is the default; each existential relation is collapsed to a single direct triple.")
                          @ValueDescription("RDF|OWL")
-                         mode: Config.OutputMode = Config.RDFMode,
+                         mode: OutputMode = RDFMode,
                          @HelpMessage("Property to restrict output relations to. Provide option multiple times for multiple properties.")
                          @ValueDescription("IRI")
                          property: List[String] = Nil,
@@ -43,27 +44,31 @@ final case class Config(
                          disableOwlNothing: BoolValue = FalseValue,
                          @HelpMessage("Set log level to INFO")
                          @ValueDescription("bool")
-                         verbose: Boolean = false)
+                         verbose: Boolean = false) {
+
+  def toRelationGraphConfig: RelationGraph.Config =
+    RelationGraph.Config(
+      mode = this.mode,
+      outputSubclasses = this.outputSubclasses.bool,
+      reflexiveSubclasses = this.reflexiveSubclasses.bool,
+      equivalenceAsSubclass = this.equivalenceAsSubclass.bool,
+      outputClasses = this.outputClasses.bool,
+      outputIndividuals = this.outputIndividuals.bool,
+      disableOwlNothing = this.disableOwlNothing.bool,
+    )
+
+}
 
 object Config {
 
-  sealed trait OutputMode
-
-  case object RDFMode extends OutputMode
-
-  case object OWLMode extends OutputMode
-
-  object OutputMode {
-
-    implicit val argParser: ArgParser[OutputMode] = SimpleArgParser.from[OutputMode]("output mode") { arg =>
-      arg.toLowerCase match {
-        case "rdf" => Right(RDFMode)
-        case "owl" => Right(OWLMode)
-        case _     => Left(MalformedValue("output mode", arg))
-      }
+  implicit val rdfModeParser: ArgParser[OutputMode] = SimpleArgParser.from[OutputMode]("output mode") { arg =>
+    arg.toLowerCase match {
+      case "rdf" => Right(RDFMode)
+      case "owl" => Right(OWLMode)
+      case _     => Left(MalformedValue("output mode", arg))
     }
-
   }
+
 
   /**
    * This works around some confusing behavior in case-app boolean parsing

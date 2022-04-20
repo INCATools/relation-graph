@@ -1,34 +1,25 @@
 package org.renci.relationgraph
 
-import caseapp._
+import com.typesafe.scalalogging.StrictLogging
 import org.apache.jena.graph.{Node, NodeFactory, Triple}
-import org.apache.jena.riot.RDFFormat
-import org.apache.jena.riot.system.{StreamRDF, StreamRDFWriter}
 import org.apache.jena.sys.JenaSystem
 import org.apache.jena.vocabulary.{OWL2, RDF, RDFS}
 import org.geneontology.whelk.BuiltIn.{Bottom, Top}
 import org.geneontology.whelk._
-import org.renci.relationgraph.Config.{OWLMode, RDFMode}
+import org.renci.relationgraph.RelationGraph.Config.{OWLMode, OutputMode, RDFMode}
 import org.semanticweb.owlapi.apibinding.OWLFunctionalSyntaxFactory.{OWLNothing, OWLThing}
-import org.semanticweb.owlapi.apibinding.OWLManager
-import org.semanticweb.owlapi.model._
 import org.semanticweb.owlapi.model.parameters.Imports
-import scribe.Level
-import scribe.filter.{packageName, select}
-import zio.ZIO.attemptBlockingIO
+import org.semanticweb.owlapi.model._
 import zio._
 import zio.stream._
 
-import java.io.{File, FileOutputStream}
 import java.lang.{Runtime => JRuntime}
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.Base64
-import java.util.concurrent.TimeUnit
-import scala.io.Source
 import scala.jdk.CollectionConverters._
 
-object Main extends ZCaseApp[Config] {
+object RelationGraph extends StrictLogging {
 
   JenaSystem.init()
 
@@ -40,84 +31,49 @@ object Main extends ZCaseApp[Config] {
   private val OWLSomeValuesFrom = OWL2.someValuesFrom.asNode
   private val OWLOntology = OWL2.Ontology.asNode
 
-  override def run(config: Config, arg: RemainingArgs): ZIO[ZEnv, Nothing, ExitCode] = {
-    val configureLogging = ZIO.succeed {
-      scribe.Logger.root
-        .clearHandlers()
-        .clearModifiers()
-        .withModifier(select(packageName("org.renci.relationgraph")).boosted(Level.Info, Level.Warn))
-        .withHandler(minimumLevel = Some(if (config.verbose) Level.Info else Level.Warn))
-        .replace()
-    }
+  final case class Config(
+                           mode: OutputMode = RDFMode,
+                           outputSubclasses: Boolean = false,
+                           reflexiveSubclasses: Boolean = true,
+                           equivalenceAsSubclass: Boolean = true,
+                           outputClasses: Boolean = true,
+                           outputIndividuals: Boolean = false,
+                           disableOwlNothing: Boolean = false,
+                         )
 
-    val program = ZIO.scoped {
-      createStreamRDF(config.outputFile).flatMap { rdfWriter =>
-        for {
-          fileProperties <- config.propertiesFile.map(readPropertiesFile).getOrElse(ZIO.succeed(Set.empty[AtomicConcept]))
-          specifiedProperties = fileProperties ++ config.property.map(prop => AtomicConcept(prop)).to(Set)
-          ontology <- loadOntology(config.ontologyFile)
-          whelkOntology = Bridge.ontologyToAxioms(ontology)
-          _ <- ZIO.succeed(scribe.info("Running reasoner"))
-          whelk = Reasoner.assert(whelkOntology, disableBottom = config.disableOwlNothing.bool)
-          indexedWhelk = IndexedReasonerState(whelk)
-          _ <- ZIO.succeed(scribe.info("Done running reasoner"))
-          _ <- ZIO.fail(new Exception("Ontology is incoherent; please correct unsatisfiable classes.")).when(isIncoherent(whelk))
-          _ <- attemptBlockingIO(rdfWriter.triple(Triple.create(NodeFactory.createBlankNode("redundant"), RDFType, OWLOntology)))
-            .when(config.mode == OWLMode)
-          start <- Clock.currentTime(TimeUnit.MILLISECONDS)
-          triplesStream = computeRelations(ontology, indexedWhelk, specifiedProperties, config.outputSubclasses.bool, config.reflexiveSubclasses.bool, config.equivalenceAsSubclass.bool, config.outputClasses.bool, config.outputIndividuals.bool, config.mode)
-          _ <- triplesStream.foreach {
-            case TriplesGroup(triples) => ZIO.attempt(triples.foreach(rdfWriter.triple))
-          }
-          stop <- Clock.currentTime(TimeUnit.MILLISECONDS)
-          _ <- ZIO.succeed(scribe.info(s"Computed relations in ${(stop - start) / 1000.0}s"))
-        } yield ()
-      }
-    }
-    configureLogging *>
-      program.as(ExitCode.success)
-        .catchAll { e =>
-          if (config.verbose) ZIO.succeed(e.printStackTrace()).as(ExitCode.failure)
-          else ZIO.succeed(scribe.error(e.getMessage)).as(ExitCode.failure)
-        }
+  object Config {
+
+    sealed trait OutputMode
+
+    case object RDFMode extends OutputMode
+
+    case object OWLMode extends OutputMode
+
   }
 
-  def computeRelations(ontology: OWLOntology, whelk: IndexedReasonerState, specifiedProperties: Set[AtomicConcept], outputSubclasses: Boolean, reflexiveSubclasses: Boolean, equivalenceAsSubclass: Boolean, outputClasses: Boolean, outputIndividuals: Boolean, mode: Config.OutputMode): UStream[TriplesGroup] = {
-    val classes = classHierarchy(whelk.state)
+  def computeRelations(ontology: OWLOntology, specifiedProperties: Set[AtomicConcept], outputConfig: Config): UStream[TriplesGroup] = {
+    val whelkOntology = Bridge.ontologyToAxioms(ontology)
+    logger.info("Running reasoner")
+    val whelk = Reasoner.assert(whelkOntology, disableBottom = outputConfig.disableOwlNothing)
+    val indexedWhelk = IndexedReasonerState(whelk)
+    logger.info("Done running reasoner")
+    val classes = classHierarchy(indexedWhelk.state)
     val properties = propertyHierarchy(ontology)
     val allProperties = properties.subclasses.keySet.map(c => Role(c.id))
-    val classesTasks = if (outputSubclasses) {
-      allClasses(ontology).map(c => ZIO.succeed(processSubclasses(c, whelk.state, reflexiveSubclasses, equivalenceAsSubclass, outputClasses, outputIndividuals)))
+    val ontologyDeclarationStream = ZStream.succeed(ZIO.succeed(TriplesGroup(Set(Triple.create(NodeFactory.createBlankNode("redundant"), RDFType, OWLOntology)))))
+      .when(outputConfig.mode == OWLMode)
+    val classesTasks = if (outputConfig.outputSubclasses) {
+      allClasses(ontology).map(c => ZIO.succeed(processSubclasses(c, indexedWhelk.state, outputConfig.reflexiveSubclasses, outputConfig.equivalenceAsSubclass, outputConfig.outputClasses, outputConfig.outputIndividuals)))
     } else Stream.empty
     val streamZ = for {
       queue <- Queue.unbounded[Restriction]
       activeRestrictions <- Ref.make(0)
       seenRefs <- ZIO.foreach(allProperties)(p => Ref.make(Set.empty[AtomicConcept]).map(p -> _)).map(_.toMap)
       _ <- traverse(specifiedProperties, properties, classes, queue, activeRestrictions, seenRefs)
-      restrictionsStream = Stream.fromQueue(queue).map(r => processRestrictionAndExtendQueue(r, properties, classes, whelk, mode, specifiedProperties.isEmpty, outputClasses, outputIndividuals, queue, activeRestrictions, seenRefs))
-      allTasks = classesTasks ++ restrictionsStream
+      restrictionsStream = Stream.fromQueue(queue).map(r => processRestrictionAndExtendQueue(r, properties, classes, indexedWhelk, outputConfig.mode, specifiedProperties.isEmpty, outputConfig.outputClasses, outputConfig.outputIndividuals, queue, activeRestrictions, seenRefs))
+      allTasks = ontologyDeclarationStream ++ classesTasks ++ restrictionsStream
     } yield allTasks.mapZIOParUnordered(JRuntime.getRuntime.availableProcessors)(identity)
     Stream.unwrap(streamZ)
-  }
-
-  def readPropertiesFile(file: String): ZIO[Any, Throwable, Set[AtomicConcept]] =
-    ZIO.attemptBlocking(Source.fromFile(file, "utf-8")).acquireReleaseWithAuto { source =>
-      ZIO.attemptBlocking(source.getLines().map(_.trim).filter(_.nonEmpty).map(line => AtomicConcept(line)).to(Set))
-    }
-
-  def loadOntology(path: String): Task[OWLOntology] = for {
-    manager <- ZIO.attempt(OWLManager.createOWLOntologyManager())
-    ontology <- ZIO.attemptBlocking(manager.loadOntologyFromOntologyDocument(new File(path)))
-  } yield ontology
-
-  def createStreamRDF(path: String): ZIO[Scope, Throwable, StreamRDF] = {
-    ZIO.acquireRelease(ZIO.attempt(new FileOutputStream(new File(path))))(stream => ZIO.succeed(stream.close())).flatMap { outputStream =>
-      ZIO.acquireRelease(ZIO.attempt {
-        val stream = StreamRDFWriter.getWriterStream(outputStream, RDFFormat.TURTLE_FLAT, null)
-        stream.start()
-        stream
-      })(stream => ZIO.succeed(stream.finish()))
-    }
   }
 
   def allClasses(ont: OWLOntology): ZStream[Any, Nothing, OWLClass] = Stream.fromIterable(ont.getClassesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLThing - OWLNothing)
@@ -317,5 +273,6 @@ object Main extends ZCaseApp[Config] {
       state.linksByTarget.view.mapValues(_.to(List)).toMap
 
   }
+
 
 }

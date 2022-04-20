@@ -13,7 +13,7 @@ import java.io.IOException
 /**
  * Adapted from caseapp.cats.IOCaseApp
  */
-abstract class ZCaseApp[T](implicit val parser0: Parser[T], val messages: Help[T]) extends App {
+abstract class ZCaseApp[T](implicit val parser0: Parser[T], val messages: Help[T]) extends ZIOAppDefault {
 
   private[this] def parser: Parser[T] = {
     val p = parser0.nameFormatter(nameFormatter)
@@ -23,15 +23,15 @@ abstract class ZCaseApp[T](implicit val parser0: Parser[T], val messages: Help[T
       p
   }
 
-  def run(options: T, remainingArgs: RemainingArgs): ZIO[ZEnv, Nothing, ExitCode]
+  def run(options: T, remainingArgs: RemainingArgs): ZIO[Environment, Nothing, ExitCode]
 
-  private[this] def error(message: Error): ZIO[Console, IOException, ExitCode] =
+  private[this] def error(message: Error): ZIO[Any, IOException, ExitCode] =
     printLine(message.message).as(ExitCode.failure)
 
-  private[this] def helpAsked: ZIO[Console, IOException, ExitCode] =
+  private[this] def helpAsked: ZIO[Any, IOException, ExitCode] =
     printLine(messages.withHelp.help).as(ExitCode.success)
 
-  private[this] def usageAsked: ZIO[Console, IOException, ExitCode] =
+  private[this] def usageAsked: ZIO[Any, IOException, ExitCode] =
     printLine(messages.withHelp.usage).as(ExitCode.success)
 
   /**
@@ -64,14 +64,17 @@ abstract class ZCaseApp[T](implicit val parser0: Parser[T], val messages: Help[T
 
   private[this] def nameFormatter: Formatter[Name] = Formatter.DefaultNameFormatter
 
-  override def run(args: List[String]): ZIO[ZEnv, Nothing, ExitCode] = {
-    if (args == List("--version")) ZIO.succeed(println(org.renci.relationgraph.BuildInfo.toString)).exitCode
-    else parser.withHelp.detailedParse(expandArgs(args), stopAtFirstUnrecognized) match {
-      case Left(err)                                        => error(err).orDie
-      case Right((WithHelp(_, true, _), _))                 => helpAsked.orDie
-      case Right((WithHelp(true, _, _), _))                 => usageAsked.orDie
-      case Right((WithHelp(_, _, Left(err)), _))            => error(err).orDie
-      case Right((WithHelp(_, _, Right(t)), remainingArgs)) => run(t, remainingArgs)
+  override def run: ZIO[Environment with ZIOAppArgs with Scope, Any, Any] = {
+    ZIO.service[ZIOAppArgs].flatMap { appArgs =>
+      val args = appArgs.getArgs.toList
+      if (args == List("--version")) ZIO.succeed(println(org.renci.relationgraph.BuildInfo.toString)).exitCode
+      else parser.withHelp.detailedParse(expandArgs(args), stopAtFirstUnrecognized) match {
+        case Left(err)                                        => error(err).orDie
+        case Right((WithHelp(_, true, _), _))                 => helpAsked.orDie
+        case Right((WithHelp(true, _, _), _))                 => usageAsked.orDie
+        case Right((WithHelp(_, _, Left(err)), _))            => error(err).orDie
+        case Right((WithHelp(_, _, Right(t)), remainingArgs)) => run(t, remainingArgs)
+      }
     }
   }
 
