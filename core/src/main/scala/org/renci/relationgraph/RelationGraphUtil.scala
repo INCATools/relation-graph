@@ -39,7 +39,7 @@ object RelationGraphUtil {
         }
       }
       .runCollect
-      .map(_.toSet.flatten)
+      .map(_.toSet.flatten[OWLClassAxiom])
       .map(_.asJava)
     Runtime.default.unsafeRun(owlZ)
   }
