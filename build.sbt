@@ -1,42 +1,77 @@
-enablePlugins(JavaAppPackaging)
-enablePlugins(BuildInfoPlugin)
-enablePlugins(GitVersioning)
+lazy val zioVersion = "2.0.0-RC5"
+lazy val gitCommitString = SettingKey[String]("gitCommit")
 
-organization := "org.renci"
+lazy val commonSettings = Seq(
+  organization := "org.geneontology",
+  version := "2.2-SNAPSHOT",
+  licenses := Seq("MIT license" -> url("https://opensource.org/licenses/MIT")),
+  scalaVersion := "2.13.8",
+  scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8"),
+  javaOptions += "-Xmx8G"
+)
 
-name := "relation-graph"
+lazy val publishSettings = Seq(
+  Test / publishArtifact := false,
+  publishMavenStyle := true,
+  publishTo := {
+    val nexus = "https://oss.sonatype.org/"
+    if (isSnapshot.value) Some("snapshots" at nexus + "content/repositories/snapshots")
+    else Some("releases" at nexus + "service/local/staging/deploy/maven2")
+  },
+  pomExtra := <scm>
+    <url>git@github.com:balhoff/relation-graph.git</url>
+    <connection>scm:git:git@github.com:balhoff/relation-graph.git</connection>
+  </scm>
+    <developers>
+      <developer>
+        <id>balhoff</id>
+        <name>Jim Balhoff</name>
+        <email>balhoff@renci.org</email>
+      </developer>
+    </developers>
+)
 
-version := "2.1.0"
+lazy val parentProject = project
+  .in(file("."))
+  .settings(commonSettings)
+  .settings(name := "relation-graph-project", publish / skip := true)
+  .aggregate(core, cli)
 
-licenses := Seq("MIT license" -> url("https://opensource.org/licenses/MIT"))
-
-scalaVersion := "2.13.8"
-
-scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8")
-
-javaOptions += "-Xmx8G"
-
-testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
-
-val gitCommitString = SettingKey[String]("gitCommit")
-
-gitCommitString := git.gitHeadCommit.value.getOrElse("Not Set")
-
-buildInfoKeys := Seq[BuildInfoKey](name, version, scalaVersion, sbtVersion, gitCommitString)
-
-buildInfoPackage := "org.renci.relationgraph"
-
-val zioVersion = "2.0.0-RC3"
-
-libraryDependencies ++= {
-  Seq(
-    "dev.zio"                    %% "zio"              % zioVersion,
-    "dev.zio"                    %% "zio-streams"      % zioVersion,
-    "org.geneontology"           %% "whelk-owlapi"     % "1.1.1",
-    "com.outr"                   %% "scribe-slf4j"     % "3.8.2",
-    "com.github.alexarchambault" %% "case-app"         % "2.0.6",
-    "org.apache.jena"             % "apache-jena-libs" % "4.4.0" exclude ("org.slf4j", "slf4j-log4j12"),
-    "dev.zio"                    %% "zio-test"         % zioVersion % Test,
-    "dev.zio"                    %% "zio-test-sbt"     % zioVersion % Test
+lazy val core = project
+  .in(file("core"))
+  .settings(commonSettings)
+  .settings(
+    name := "relation-graph",
+    description := "relation-graph core",
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
+    libraryDependencies ++= Seq(
+      "dev.zio" %% "zio" % zioVersion,
+      "dev.zio" %% "zio-streams" % zioVersion,
+      "org.geneontology" %% "whelk-owlapi" % "1.1.1",
+      "org.apache.jena" % "apache-jena-libs" % "4.4.0" exclude("org.slf4j", "slf4j-log4j12"),
+      "com.typesafe.scala-logging" %% "scala-logging" % "3.9.4",
+      "dev.zio" %% "zio-test" % zioVersion % Test,
+      "dev.zio" %% "zio-test-sbt" % zioVersion % Test
+    )
   )
-}
+  .settings(publishSettings)
+
+lazy val cli = project
+  .in(file("cli"))
+  .enablePlugins(JavaAppPackaging)
+  .enablePlugins(BuildInfoPlugin)
+  .enablePlugins(GitVersioning)
+  .settings(commonSettings)
+  .dependsOn(core)
+  .settings(
+    name := "relation-graph-cli",
+    executableScriptName := "relation-graph",
+    publish / skip := true,
+    libraryDependencies ++= Seq(
+      "com.outr" %% "scribe-slf4j" % "3.8.2",
+      "com.github.alexarchambault" %% "case-app" % "2.0.6"
+    ),
+    gitCommitString := git.gitHeadCommit.value.getOrElse("Not Set"),
+    buildInfoKeys := Seq[BuildInfoKey](name, version, scalaVersion, sbtVersion, gitCommitString),
+    buildInfoPackage := "org.renci.relationgraph"
+  )

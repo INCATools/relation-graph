@@ -1,19 +1,30 @@
 package org.renci.relationgraph
 
 import org.apache.jena.graph.{Node, NodeFactory, Triple}
-import org.geneontology.whelk.{Bridge, Reasoner}
-import org.renci.relationgraph.Main.{IndexedReasonerState, TriplesGroup}
+import org.renci.relationgraph.RelationGraph.Config.RDFMode
+import org.renci.relationgraph.RelationGraph.{Config, TriplesGroup}
 import org.semanticweb.owlapi.apibinding.OWLManager
 import zio._
 import zio.test.TestAspect.timeout
 import zio.test._
 
-object TestRelationGraph extends DefaultRunnableSpec {
+
+object TestRelationGraph extends ZIOSpecDefault {
 
   private val Prefix = "http://example.org/test"
   private val P = NodeFactory.createURI(s"$Prefix#p")
 
   private def n: String => Node = NodeFactory.createURI
+
+  private val testConfig = Config(
+    mode = RDFMode,
+    outputSubclasses = true,
+    reflexiveSubclasses = false,
+    equivalenceAsSubclass = false,
+    outputClasses = true,
+    outputIndividuals = false,
+    disableOwlNothing = false
+  )
 
   def spec =
     suite("RelationGraphSpec")(
@@ -21,10 +32,7 @@ object TestRelationGraph extends DefaultRunnableSpec {
         for {
           manager <- ZIO.attempt(OWLManager.createOWLOntologyManager())
           ontology <- ZIO.attempt(manager.loadOntologyFromOntologyDocument(this.getClass.getResourceAsStream("materialize_test.ofn")))
-          whelkOntology = Bridge.ontologyToAxioms(ontology)
-          whelk = Reasoner.assert(whelkOntology)
-          indexedWhelk = IndexedReasonerState(whelk)
-          resultsStream = Main.computeRelations(ontology, indexedWhelk, Set.empty, true, false, false, true, false, Config.RDFMode)
+          resultsStream = RelationGraph.computeRelations(ontology, Set.empty, testConfig)
           results <- resultsStream.runCollect
           triples <- ZIO.from(results.reduceOption((left, right) => TriplesGroup(left.redundant ++ right.redundant)))
           TriplesGroup(redundant) = triples
@@ -40,10 +48,7 @@ object TestRelationGraph extends DefaultRunnableSpec {
         for {
           manager <- ZIO.attempt(OWLManager.createOWLOntologyManager())
           ontology <- ZIO.attempt(manager.loadOntologyFromOntologyDocument(this.getClass.getResourceAsStream("apo.owl")))
-          whelkOntology = Bridge.ontologyToAxioms(ontology)
-          whelk = Reasoner.assert(whelkOntology)
-          indexedWhelk = IndexedReasonerState(whelk)
-          resultsStream = Main.computeRelations(ontology, indexedWhelk, Set.empty, true, false, false, true, false, Config.RDFMode)
+          resultsStream = RelationGraph.computeRelations(ontology, Set.empty, testConfig)
           results <- resultsStream.runCollect
           triples <- ZIO.from(results.reduceOption((left, right) => TriplesGroup(left.redundant ++ right.redundant)))
           TriplesGroup(redundant) = triples
