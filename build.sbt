@@ -19,10 +19,7 @@ lazy val publishSettings = Seq(
     if (isSnapshot.value) Some("snapshots" at nexus + "content/repositories/snapshots")
     else Some("releases" at nexus + "service/local/staging/deploy/maven2")
   },
-  pomExtra := <scm>
-    <url>git@github.com:balhoff/relation-graph.git</url>
-    <connection>scm:git:git@github.com:balhoff/relation-graph.git</connection>
-  </scm>
+  pomExtra :=
     <developers>
       <developer>
         <id>balhoff</id>
