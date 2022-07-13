@@ -66,7 +66,7 @@ lazy val cli = project
     executableScriptName := "relation-graph",
     publish / skip := true,
     libraryDependencies ++= Seq(
-      "com.outr" %% "scribe-slf4j" % "3.8.2",
+      "com.outr" %% "scribe-slf4j" % "3.8.3",
       "com.github.alexarchambault" %% "case-app" % "2.0.6"
     ),
     gitCommitString := git.gitHeadCommit.value.getOrElse("Not Set"),
