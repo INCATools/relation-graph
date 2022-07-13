@@ -50,7 +50,7 @@ object Main extends ZCaseApp[Config] {
   def createStreamRDF(path: String): ZIO[Scope, Throwable, StreamRDF] = {
     ZIO.acquireRelease(ZIO.attempt(new FileOutputStream(new File(path))))(stream => ZIO.succeed(stream.close())).flatMap { outputStream =>
       ZIO.acquireRelease(ZIO.attempt {
-        val stream = StreamRDFWriter.getWriterStream(outputStream, RDFFormat.TURTLE_FLAT, null)
+        val stream = StreamRDFWriter.getWriterStream(outputStream, RDFFormat.NTRIPLES, null)
         stream.start()
         stream
       })(stream => ZIO.succeed(stream.finish()))
