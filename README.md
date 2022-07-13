@@ -56,4 +56,4 @@ Usage: relation-graph [options]
 ## Build
 Install `sbt` (Scala Build Tool) on your system. For Mac OS X, it is easily done using [Homebrew](http://brew.sh):  `brew install sbt`. `sbt` requires a working Java installation, but you do not need to otherwise install Scala.
 
-After `sbt` is installed, run `sbt stage` to create the executable. The executable is created in your `target/universal/stage/bin` directory.
+After `sbt` is installed, run `sbt stage` to create the executable. The executable is created in your `cli/target/universal/stage/bin` directory.
