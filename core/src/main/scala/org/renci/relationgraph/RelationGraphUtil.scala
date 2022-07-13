@@ -22,7 +22,7 @@ object RelationGraphUtil {
   /**
    * @param ontology
    * @param specifiedProperties properties for which to compute relations; an empty collection signifies all
-   * @param outputConfig configuration for RelationGraph; `mode` is ignored, since results are converted to OWL axioms
+   * @param outputConfig        configuration for RelationGraph; `mode` is ignored, since results are converted to OWL axioms
    * @return
    */
   def computeRelationGraph(ontology: OWLOntology, specifiedProperties: util.Collection[IRI], outputConfig: Config): util.Set[OWLClassAxiom] = {
@@ -41,7 +41,9 @@ object RelationGraphUtil {
       .runCollect
       .map(_.toSet.flatten[OWLClassAxiom])
       .map(_.asJava)
-    Runtime.default.unsafeRun(owlZ)
+    Unsafe.unsafe { implicit u =>
+      Runtime.default.unsafe.run(owlZ).getOrThrow()
+    }
   }
 
 }
