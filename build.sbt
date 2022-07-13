@@ -1,4 +1,4 @@
-lazy val zioVersion = "2.0.0-RC5"
+lazy val zioVersion = "2.0.0"
 lazy val gitCommitString = SettingKey[String]("gitCommit")
 
 lazy val commonSettings = Seq(
@@ -45,9 +45,9 @@ lazy val core = project
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zioVersion,
       "dev.zio" %% "zio-streams" % zioVersion,
-      "org.geneontology" %% "whelk-owlapi" % "1.1.1",
+      "org.geneontology" %% "whelk-owlapi" % "1.1.2",
       "org.apache.jena" % "apache-jena-libs" % "4.5.0" exclude("org.slf4j", "slf4j-log4j12"),
-      "com.typesafe.scala-logging" %% "scala-logging" % "3.9.4",
+      "com.typesafe.scala-logging" %% "scala-logging" % "3.9.5",
       "dev.zio" %% "zio-test" % zioVersion % Test,
       "dev.zio" %% "zio-test-sbt" % zioVersion % Test
     )
@@ -66,7 +66,7 @@ lazy val cli = project
     executableScriptName := "relation-graph",
     publish / skip := true,
     libraryDependencies ++= Seq(
-      "com.outr" %% "scribe-slf4j" % "3.8.2",
+      "com.outr" %% "scribe-slf4j" % "3.8.3",
       "com.github.alexarchambault" %% "case-app" % "2.0.6"
     ),
     gitCommitString := git.gitHeadCommit.value.getOrElse("Not Set"),
