@@ -45,7 +45,7 @@ lazy val core = project
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zioVersion,
       "dev.zio" %% "zio-streams" % zioVersion,
-      "org.geneontology" %% "whelk-owlapi" % "1.1.1",
+      "org.geneontology" %% "whelk-owlapi" % "1.1.2",
       "org.apache.jena" % "apache-jena-libs" % "4.4.0" exclude("org.slf4j", "slf4j-log4j12"),
       "com.typesafe.scala-logging" %% "scala-logging" % "3.9.4",
       "dev.zio" %% "zio-test" % zioVersion % Test,
