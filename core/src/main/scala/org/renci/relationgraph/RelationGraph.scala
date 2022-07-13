@@ -64,19 +64,19 @@ object RelationGraph extends StrictLogging {
       .when(outputConfig.mode == OWLMode)
     val classesTasks = if (outputConfig.outputSubclasses) {
       allClasses(ontology).map(c => ZIO.succeed(processSubclasses(c, indexedWhelk.state, outputConfig.reflexiveSubclasses, outputConfig.equivalenceAsSubclass, outputConfig.outputClasses, outputConfig.outputIndividuals)))
-    } else Stream.empty
+    } else ZStream.empty
     val streamZ = for {
       queue <- Queue.unbounded[Restriction]
       activeRestrictions <- Ref.make(0)
       seenRefs <- ZIO.foreach(allProperties)(p => Ref.make(Set.empty[AtomicConcept]).map(p -> _)).map(_.toMap)
       _ <- traverse(specifiedProperties, properties, classes, queue, activeRestrictions, seenRefs)
-      restrictionsStream = Stream.fromQueue(queue).map(r => processRestrictionAndExtendQueue(r, properties, classes, indexedWhelk, outputConfig.mode, specifiedProperties.isEmpty, outputConfig.outputClasses, outputConfig.outputIndividuals, queue, activeRestrictions, seenRefs))
+      restrictionsStream = ZStream.fromQueue(queue).map(r => processRestrictionAndExtendQueue(r, properties, classes, indexedWhelk, outputConfig.mode, specifiedProperties.isEmpty, outputConfig.outputClasses, outputConfig.outputIndividuals, queue, activeRestrictions, seenRefs))
       allTasks = ontologyDeclarationStream ++ classesTasks ++ restrictionsStream
     } yield allTasks.mapZIOParUnordered(JRuntime.getRuntime.availableProcessors)(identity)
-    Stream.unwrap(streamZ)
+    ZStream.unwrap(streamZ)
   }
 
-  def allClasses(ont: OWLOntology): ZStream[Any, Nothing, OWLClass] = Stream.fromIterable(ont.getClassesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLThing - OWLNothing)
+  def allClasses(ont: OWLOntology): ZStream[Any, Nothing, OWLClass] = ZStream.fromIterable(ont.getClassesInSignature(Imports.INCLUDED).asScala.to(Set) - OWLThing - OWLNothing)
 
   def traverse(specifiedProperties: Set[AtomicConcept], properties: Hierarchy, classes: Hierarchy, queue: Queue[Restriction], activeRestrictions: Ref[Int], seenRefs: Map[Role, Ref[Set[AtomicConcept]]]): UIO[Unit] = {
     val descendProperties = specifiedProperties.isEmpty
