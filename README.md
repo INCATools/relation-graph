@@ -55,7 +55,7 @@ Usage: relation-graph [options]
 
 ## Installation
 ### MacOS
-1. Download `relation-graph-cli-*.tgz` [latest release](https://github.com/balhoff/relation-graph/releases/latest).
+1. Download `relation-graph-cli-*.tgz` from the [latest release](https://github.com/balhoff/relation-graph/releases/latest).
 2. Unzip `relation-graph-cli-*.tgz`.
 3. Run:
 ```
