@@ -57,9 +57,14 @@ Usage: relation-graph [options]
 ### MacOS
 1. Download `relation-graph-cli-*.tgz` [latest release](https://github.com/balhoff/relation-graph/releases/latest).
 2. Unzip `relation-graph-cli-*.tgz`.
-3. From within the unzipped folder, run:
-  - `cp bin/* /usr/local/bin/`
-  - `cp lib/* /usr/local/lib/`
+3. Run:
+```
+cd path/to/unzipped/relation-graph-cli-*/
+cp bin/* /usr/local/bin/
+cp lib/* /usr/local/lib/
+chmod 777 /usr/local/bin/relation-graph
+```
+4. If prompted by MacOS, [allow permissions](https://support.apple.com/en-us/HT202491).
 
 ## Build
 Install `sbt` (Scala Build Tool) on your system. For Mac OS X, it is easily done using [Homebrew](http://brew.sh):  `brew install sbt`. `sbt` requires a working Java installation, but you do not need to otherwise install Scala.
