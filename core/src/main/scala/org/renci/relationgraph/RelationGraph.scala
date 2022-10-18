@@ -58,7 +58,7 @@ object RelationGraph extends StrictLogging {
     val indexedWhelk = IndexedReasonerState(whelk)
     logger.info("Done running reasoner")
     val classes = classHierarchy(indexedWhelk.state)
-    val properties = propertyHierarchy(ontology)
+    val properties = propertyHierarchy(ontology, specifiedProperties)
     val allProperties = properties.subclasses.keySet.map(c => Role(c.id))
     val ontologyDeclarationStream = ZStream.succeed(ZIO.succeed(TriplesGroup(Set(Triple.create(NodeFactory.createBlankNode("redundant"), RDFType, OWLOntology)))))
       .when(outputConfig.mode == OWLMode)
@@ -181,7 +181,7 @@ object RelationGraph extends StrictLogging {
     Hierarchy(equivMap, subclassTaxonomy)
   }
 
-  def propertyHierarchy(ont: OWLOntology): Hierarchy = {
+  def propertyHierarchy(ont: OWLOntology, requestedProperties: Set[AtomicConcept]): Hierarchy = {
     val subPropAxioms = ont.getAxioms(AxiomType.SUB_OBJECT_PROPERTY).asScala.to(Set).collect {
       case ax if ax.getSubProperty.isNamed && ax.getSuperProperty.isNamed && !ax.getSuperProperty.isOWLTopObjectProperty => ConceptInclusion(
         AtomicConcept(ax.getSubProperty.asOWLObjectProperty.getIRI.toString),
@@ -191,7 +191,10 @@ object RelationGraph extends StrictLogging {
       .filterNot(_.isOWLTopObjectProperty)
       .map(prop =>
         ConceptInclusion(AtomicConcept(prop.getIRI.toString), AtomicConcept(prop.getIRI.toString)))
-    val allAxioms = (subPropAxioms ++ allProps).toSet[Axiom]
+    val requestedProps = requestedProperties
+      .filterNot(_ == BuiltIn.Top)
+      .map(prop => ConceptInclusion(prop, prop))
+    val allAxioms = (subPropAxioms ++ allProps ++ requestedProps).toSet[Axiom]
     val whelk = Reasoner.assert(allAxioms)
     classHierarchy(whelk)
   }

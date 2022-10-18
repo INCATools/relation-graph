@@ -1,6 +1,7 @@
 package org.renci.relationgraph
 
 import org.apache.jena.graph.{Node, NodeFactory, Triple}
+import org.geneontology.whelk.AtomicConcept
 import org.renci.relationgraph.RelationGraph.Config.RDFMode
 import org.renci.relationgraph.RelationGraph.{Config, TriplesGroup}
 import org.semanticweb.owlapi.apibinding.OWLManager
@@ -53,7 +54,17 @@ object TestRelationGraph extends ZIOSpecDefault {
           triples <- ZIO.from(results.reduceOption((left, right) => TriplesGroup(left.redundant ++ right.redundant)))
           TriplesGroup(redundant) = triples
         } yield assertTrue(ontology.getObjectPropertiesInSignature().isEmpty) && assertTrue(redundant.nonEmpty)
-      } @@ timeout(5.seconds)
+      } @@ timeout(5.seconds),
+      test("properlyHandleUndefinedRelation") {
+        for {
+          manager <- ZIO.attempt(OWLManager.createOWLOntologyManager())
+          ontology <- ZIO.attempt(manager.loadOntologyFromOntologyDocument(this.getClass.getResourceAsStream("zfa.owl")))
+          resultsStream = RelationGraph.computeRelations(ontology, Set(AtomicConcept("http://purl.obolibrary.org/obo/BFO_0000050"), AtomicConcept("http://purl.obolibrary.org/obo/nonexistent")), testConfig.copy(outputSubclasses = false))
+          results <- resultsStream.runCollect
+          triples <- ZIO.from(results.reduceOption((left, right) => TriplesGroup(left.redundant ++ right.redundant)))
+          TriplesGroup(redundant) = triples
+        } yield assertTrue(redundant.nonEmpty)
+      }
     )
 
 }
