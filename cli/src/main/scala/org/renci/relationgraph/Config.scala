@@ -18,10 +18,10 @@ final case class Config(
                          @HelpMessage("Configure style of triples to be output. RDF mode is the default; each existential relation is collapsed to a single direct triple.")
                          @ValueDescription("RDF|OWL")
                          mode: OutputMode = RDFMode,
-                         @HelpMessage("Property to restrict output relations to. Provide option multiple times for multiple properties.")
+                         @HelpMessage("Property to restrict output relations to. Provide option multiple times for multiple properties. If no properties are provided (via CLI or file), then all properties found in the ontology will be used.")
                          @ValueDescription("IRI")
                          property: List[String] = Nil,
-                         @HelpMessage("File containing line-separated property IRIs to restrict output relations to.")
+                         @HelpMessage("File containing line-separated property IRIs to restrict output relations to. If no properties are provided (via CLI or file), then all properties found in the ontology will be used.")
                          @ValueDescription("filename")
                          propertiesFile: Option[String],
                          @HelpMessage("Include entailed rdfs:subClassOf or owl:equivalentClass relations in output (default false)")
