@@ -25,8 +25,6 @@ Usage: relation-graph [options]
         Print usage and exit
   --help | -h  <bool>
         Print help message and exit
-  --version 
-        Print release info and exit
   --ontology-file  <filename>
         Input OWL ontology
   --output-file  <filename>
@@ -49,6 +47,8 @@ Usage: relation-graph [options]
         Output triples where individuals are subjects, with classes as objects (default false)
   --disable-owl-nothing  <bool>
         Disable inference of unsatisfiable classes by the whelk reasoner (default false)
+  --remove-gcis  <bool>
+        Filter out subclass axioms where the left side is a complex expression
   --verbose  <bool>
         Set log level to INFO
 ```
