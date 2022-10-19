@@ -6,7 +6,7 @@ import org.apache.jena.sys.JenaSystem
 import org.apache.jena.vocabulary.{OWL2, RDF, RDFS}
 import org.geneontology.whelk.BuiltIn.{Bottom, Top}
 import org.geneontology.whelk._
-import org.renci.relationgraph.RelationGraph.Config.{OWLMode, OutputMode, RDFMode}
+import org.renci.relationgraph.RelationGraph.Config.{OWLMode, RDFMode, TriplesMode}
 import org.semanticweb.owlapi.apibinding.OWLFunctionalSyntaxFactory.{OWLNothing, OWLThing}
 import org.semanticweb.owlapi.model.parameters.Imports
 import org.semanticweb.owlapi.model._
@@ -32,7 +32,7 @@ object RelationGraph extends StrictLogging {
   private val OWLOntology = OWL2.Ontology.asNode
 
   final case class Config(
-                           mode: OutputMode = RDFMode,
+                           mode: TriplesMode = RDFMode,
                            outputSubclasses: Boolean = false,
                            reflexiveSubclasses: Boolean = true,
                            equivalenceAsSubclass: Boolean = true,
@@ -43,11 +43,11 @@ object RelationGraph extends StrictLogging {
 
   object Config {
 
-    sealed trait OutputMode
+    sealed trait TriplesMode
 
-    case object RDFMode extends OutputMode
+    case object RDFMode extends TriplesMode
 
-    case object OWLMode extends OutputMode
+    case object OWLMode extends TriplesMode
 
   }
 
@@ -101,7 +101,7 @@ object RelationGraph extends StrictLogging {
     } yield ()
   }
 
-  def processRestrictionAndExtendQueue(restriction: Restriction, properties: Hierarchy, classes: Hierarchy, whelk: IndexedReasonerState, mode: Config.OutputMode, descendProperties: Boolean, outputClasses: Boolean, outputIndividuals: Boolean, queue: Queue[Restriction], activeRestrictions: Ref[Int], seenRefs: Map[Role, Ref[Set[AtomicConcept]]]): UIO[TriplesGroup] = {
+  def processRestrictionAndExtendQueue(restriction: Restriction, properties: Hierarchy, classes: Hierarchy, whelk: IndexedReasonerState, mode: Config.TriplesMode, descendProperties: Boolean, outputClasses: Boolean, outputIndividuals: Boolean, queue: Queue[Restriction], activeRestrictions: Ref[Int], seenRefs: Map[Role, Ref[Set[AtomicConcept]]]): UIO[TriplesGroup] = {
     val triples = processRestriction(restriction, whelk, mode, outputClasses, outputIndividuals)
     val continue = triples.redundant.nonEmpty
     for {
@@ -134,7 +134,7 @@ object RelationGraph extends StrictLogging {
     } yield triples
   }
 
-  def processRestriction(restriction: Restriction, whelk: IndexedReasonerState, mode: Config.OutputMode, outputClasses: Boolean, outputIndividuals: Boolean): TriplesGroup = {
+  def processRestriction(restriction: Restriction, whelk: IndexedReasonerState, mode: Config.TriplesMode, outputClasses: Boolean, outputIndividuals: Boolean): TriplesGroup = {
     val subConcepts = queryExistentialSubclasses(restriction, whelk)
     val subclasses = if (outputClasses) (subConcepts - Bottom).collect { case AtomicConcept(id) => id } else Set.empty[String]
     val instances = if (outputIndividuals) subConcepts.collect { case Nominal(Individual(id)) => id } else Set.empty[String]

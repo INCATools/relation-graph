@@ -10,9 +10,10 @@ import org.semanticweb.owlapi.model._
 import scribe.Level
 import scribe.filter.{packageName, select}
 import zio._
-import Config._
+import io.circe.yaml.parser
+import org.renci.relationgraph.Config.{OWLMode, RDFMode, TSVMode}
 
-import java.io.{File, FileOutputStream}
+import java.io.{File, FileOutputStream, FileReader}
 import scala.io.Source
 
 object Main extends ZCaseApp[Config] {
@@ -27,7 +28,7 @@ object Main extends ZCaseApp[Config] {
         .replace()
     }
     val program = ZIO.scoped {
-      createStreamRDF(config.outputFile).flatMap { rdfWriter =>
+      createStream(config).flatMap { rdfWriter =>
         for {
           fileProperties <- config.propertiesFile.map(readPropertiesFile).getOrElse(ZIO.succeed(Set.empty[AtomicConcept]))
           specifiedProperties = fileProperties ++ config.property.map(prop => AtomicConcept(prop)).to(Set)
@@ -47,10 +48,29 @@ object Main extends ZCaseApp[Config] {
       }.exitCode
   }
 
+  def createStream(config: Config): ZIO[Scope, Throwable, StreamRDF] = config.mode match {
+    case RDFMode => createStreamRDF(config.outputFile)
+    case OWLMode => createStreamRDF(config.outputFile)
+    case TSVMode =>
+      ZIO.foreach(config.prefixes)(readPrefixesFile).flatMap { maybePrefixes =>
+        createStreamTSV(config.outputFile, maybePrefixes.getOrElse(Map.empty), config.oboPrefixes.bool)
+      }
+  }
+
   def createStreamRDF(path: String): ZIO[Scope, Throwable, StreamRDF] = {
     ZIO.acquireRelease(ZIO.attempt(new FileOutputStream(new File(path))))(stream => ZIO.succeed(stream.close())).flatMap { outputStream =>
       ZIO.acquireRelease(ZIO.attempt {
         val stream = StreamRDFWriter.getWriterStream(outputStream, RDFFormat.NTRIPLES, null)
+        stream.start()
+        stream
+      })(stream => ZIO.succeed(stream.finish()))
+    }
+  }
+
+  def createStreamTSV(path: String, prefixes: Map[String, String], oboPrefixes: Boolean): ZIO[Scope, Throwable, StreamRDF] = {
+    ZIO.attempt(new File(path)).flatMap { file =>
+      ZIO.acquireRelease(ZIO.attempt {
+        val stream = new TSVStreamRDF(file, prefixes, oboPrefixes)
         stream.start()
         stream
       })(stream => ZIO.succeed(stream.finish()))
@@ -65,6 +85,15 @@ object Main extends ZCaseApp[Config] {
   def readPropertiesFile(file: String): ZIO[Any, Throwable, Set[AtomicConcept]] =
     ZIO.attemptBlocking(Source.fromFile(file, "utf-8")).acquireReleaseWithAuto { source =>
       ZIO.attemptBlocking(source.getLines().map(_.trim).filter(_.nonEmpty).map(line => AtomicConcept(line)).to(Set))
+    }
+
+  def readPrefixesFile(filename: String): ZIO[Any, Throwable, Map[String, String]] =
+    ZIO.attemptBlocking(new FileReader(new File(filename))).acquireReleaseWithAuto { reader =>
+      ZIO.fromEither {
+        parser.parse(reader).flatMap { json =>
+          json.as[Map[String, String]]
+        }
+      }
     }
 
 }
