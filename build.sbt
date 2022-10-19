@@ -6,7 +6,7 @@ lazy val commonSettings = Seq(
   version := "2.2.2",
   licenses := Seq("MIT license" -> url("https://opensource.org/licenses/MIT")),
   homepage := Some(url("https://github.com/balhoff/relation-graph")),
-  scalaVersion := "2.13.8",
+  scalaVersion := "2.13.10",
   scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8"),
   javaOptions += "-Xmx8G"
 )
@@ -66,7 +66,7 @@ lazy val cli = project
     executableScriptName := "relation-graph",
     publish / skip := true,
     libraryDependencies ++= Seq(
-      "com.outr" %% "scribe-slf4j" % "3.10.3",
+      "com.outr" %% "scribe-slf4j" % "3.10.4",
       "com.github.alexarchambault" %% "case-app" % "2.0.6",
       "io.circe" %% "circe-yaml" % "0.14.1",
     ),
