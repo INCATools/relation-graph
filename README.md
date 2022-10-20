@@ -29,12 +29,12 @@ Usage: relation-graph [options]
         Input OWL ontology
   --output-file  <filename>
         File to stream output triples to.
-  --mode  <RDF|OWL>
-        Configure style of triples to be output. RDF mode is the default; each existential relation is collapsed to a single direct triple.
+  --mode  <RDF|OWL|TSV>
+        Configure style of triples to be output. RDF mode is the default; each existential relation is collapsed to a single direct triple. TSV mode outputs the same triples as RDF mode, but as TSV, compacting IRIs using an optional prefixes file.
   --property  <IRI>
-        Property to restrict output relations to. Provide option multiple times for multiple properties.
+        Property to restrict output relations to. Provide option multiple times for multiple properties. If no properties are provided (via CLI or file), then all properties found in the ontology will be used.
   --properties-file  <filename>
-        File containing line-separated property IRIs to restrict output relations to.
+        File containing line-separated property IRIs to restrict output relations to. If no properties are provided (via CLI or file), then all properties found in the ontology will be used.
   --output-subclasses  <bool>
         Include entailed rdfs:subClassOf or owl:equivalentClass relations in output (default false)
   --reflexive-subclasses  <bool>
@@ -47,8 +47,10 @@ Usage: relation-graph [options]
         Output triples where individuals are subjects, with classes as objects (default false)
   --disable-owl-nothing  <bool>
         Disable inference of unsatisfiable classes by the whelk reasoner (default false)
-  --remove-gcis  <bool>
-        Filter out subclass axioms where the left side is a complex expression
+  --prefixes  <filename>
+        Prefix mappings to use for TSV output (YAML dictionary
+  --obo-prefixes  <bool>
+        Compact OBO-style IRIs regardless of inclusion in prefixes file
   --verbose  <bool>
         Set log level to INFO
 ```
