@@ -41,7 +41,7 @@ final case class Config(
                          @HelpMessage("Disable inference of unsatisfiable classes by the whelk reasoner (default false)")
                          @ValueDescription("bool")
                          disableOwlNothing: BoolValue = FalseValue,
-                         @HelpMessage("Prefix mappings to use for TSV output")
+                         @HelpMessage("Prefix mappings to use for TSV output (YAML dictionary")
                          @ValueDescription("filename")
                          prefixes: Option[String],
                          @HelpMessage("Compact OBO-style IRIs regardless of inclusion in prefixes file")
