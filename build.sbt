@@ -3,7 +3,7 @@ lazy val gitCommitString = SettingKey[String]("gitCommit")
 
 lazy val commonSettings = Seq(
   organization := "org.geneontology",
-  version := "2.2.2",
+  version := "2.3",
   licenses := Seq("MIT license" -> url("https://opensource.org/licenses/MIT")),
   homepage := Some(url("https://github.com/balhoff/relation-graph")),
   scalaVersion := "2.13.10",
