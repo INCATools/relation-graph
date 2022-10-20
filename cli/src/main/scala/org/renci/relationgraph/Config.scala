@@ -3,8 +3,7 @@ package org.renci.relationgraph
 import caseapp._
 import caseapp.core.Error.MalformedValue
 import caseapp.core.argparser.{ArgParser, SimpleArgParser}
-import org.renci.relationgraph.Config.{BoolValue, FalseValue, TrueValue}
-import org.renci.relationgraph.RelationGraph.Config.{OWLMode, OutputMode, RDFMode}
+import org.renci.relationgraph.Config.{BoolValue, FalseValue, OutputMode, RDFMode, TrueValue}
 
 @AppName("relation-graph")
 @ProgName("relation-graph")
@@ -15,8 +14,8 @@ final case class Config(
                          @HelpMessage("File to stream output triples to.")
                          @ValueDescription("filename")
                          outputFile: String,
-                         @HelpMessage("Configure style of triples to be output. RDF mode is the default; each existential relation is collapsed to a single direct triple.")
-                         @ValueDescription("RDF|OWL")
+                         @HelpMessage("Configure style of triples to be output. RDF mode is the default; each existential relation is collapsed to a single direct triple. TSV mode outputs the same triples as RDF mode, but as TSV, compacting IRIs using an optional prefixes file.")
+                         @ValueDescription("RDF|OWL|TSV")
                          mode: OutputMode = RDFMode,
                          @HelpMessage("Property to restrict output relations to. Provide option multiple times for multiple properties. If no properties are provided (via CLI or file), then all properties found in the ontology will be used.")
                          @ValueDescription("IRI")
@@ -42,13 +41,23 @@ final case class Config(
                          @HelpMessage("Disable inference of unsatisfiable classes by the whelk reasoner (default false)")
                          @ValueDescription("bool")
                          disableOwlNothing: BoolValue = FalseValue,
+                         @HelpMessage("Prefix mappings to use for TSV output (YAML dictionary")
+                         @ValueDescription("filename")
+                         prefixes: Option[String],
+                         @HelpMessage("Compact OBO-style IRIs regardless of inclusion in prefixes file")
+                         @ValueDescription("bool")
+                         oboPrefixes: BoolValue = TrueValue,
                          @HelpMessage("Set log level to INFO")
                          @ValueDescription("bool")
                          verbose: Boolean = false) {
 
   def toRelationGraphConfig: RelationGraph.Config =
     RelationGraph.Config(
-      mode = this.mode,
+      mode = this.mode match {
+        case Config.RDFMode => RelationGraph.Config.RDFMode
+        case Config.OWLMode => RelationGraph.Config.OWLMode
+        case Config.TSVMode => RelationGraph.Config.RDFMode
+      },
       outputSubclasses = this.outputSubclasses.bool,
       reflexiveSubclasses = this.reflexiveSubclasses.bool,
       equivalenceAsSubclass = this.equivalenceAsSubclass.bool,
@@ -61,10 +70,19 @@ final case class Config(
 
 object Config {
 
+  sealed trait OutputMode
+
+  case object RDFMode extends OutputMode
+
+  case object OWLMode extends OutputMode
+
+  case object TSVMode extends OutputMode
+
   implicit val rdfModeParser: ArgParser[OutputMode] = SimpleArgParser.from[OutputMode]("output mode") { arg =>
     arg.toLowerCase match {
       case "rdf" => Right(RDFMode)
       case "owl" => Right(OWLMode)
+      case "tsv" => Right(TSVMode)
       case _     => Left(MalformedValue("output mode", arg))
     }
   }
