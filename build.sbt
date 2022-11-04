@@ -68,7 +68,7 @@ lazy val cli = project
     libraryDependencies ++= Seq(
       "com.outr" %% "scribe-slf4j" % "3.10.4",
       "com.github.alexarchambault" %% "case-app" % "2.0.6",
-      "io.circe" %% "circe-yaml" % "0.14.1",
+      "io.circe" %% "circe-yaml" % "0.14.2",
     ),
     gitCommitString := git.gitHeadCommit.value.getOrElse("Not Set"),
     buildInfoKeys := Seq[BuildInfoKey](name, version, scalaVersion, sbtVersion, gitCommitString),
