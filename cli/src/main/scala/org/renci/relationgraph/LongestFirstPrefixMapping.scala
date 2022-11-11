@@ -1,10 +1,11 @@
 package org.renci.relationgraph
 
-case class LongestFirstPrefixMapping(prefixToNS: Map[String, String], oboPrefixes: Boolean) {
+final case class LongestFirstPrefixMapping(prefixToNS: Map[String, String], oboPrefixes: Boolean) {
 
   private val nsToPrefix = prefixToNS.toList
-    .map { case (prefix, ns) => (ns, prefix) }
+    .map(_.swap)
     .sortBy { case (ns, _) => -ns.length }
+
   private val oboNS = "http://purl.obolibrary.org/obo/"
 
   def compactOpt(uri: String): Option[String] = {
