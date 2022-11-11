@@ -1,17 +1,17 @@
 package org.renci.relationgraph
 
 import caseapp._
+import io.circe.yaml.parser
 import org.apache.jena.riot.RDFFormat
 import org.apache.jena.riot.system.{StreamRDF, StreamRDFWriter}
 import org.geneontology.whelk._
+import org.renci.relationgraph.Config.{OWLMode, RDFMode, TSVMode}
 import org.renci.relationgraph.RelationGraph.TriplesGroup
 import org.semanticweb.owlapi.apibinding.OWLManager
 import org.semanticweb.owlapi.model._
 import scribe.Level
 import scribe.filter.{packageName, select}
-import zio._
-import io.circe.yaml.parser
-import org.renci.relationgraph.Config.{OWLMode, RDFMode, TSVMode}
+import zio.{Config => _, _}
 
 import java.io.{File, FileOutputStream, FileReader}
 import scala.io.Source

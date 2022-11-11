@@ -54,7 +54,7 @@ object TestRelationGraph extends ZIOSpecDefault {
           triples <- ZIO.from(results.reduceOption((left, right) => TriplesGroup(left.redundant ++ right.redundant)))
           TriplesGroup(redundant) = triples
         } yield assertTrue(ontology.getObjectPropertiesInSignature().isEmpty) && assertTrue(redundant.nonEmpty)
-      } @@ timeout(5.seconds),
+      } @@ timeout(10.seconds),
       test("properlyHandleUndefinedRelation") {
         for {
           manager <- ZIO.attempt(OWLManager.createOWLOntologyManager())
