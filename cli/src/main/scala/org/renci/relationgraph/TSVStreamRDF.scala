@@ -3,7 +3,6 @@ package org.renci.relationgraph
 import org.apache.jena.graph.Triple
 import org.apache.jena.riot.system.StreamRDF
 import org.apache.jena.shared.PrefixMapping
-import org.apache.jena.shared.impl.PrefixMappingImpl
 import org.apache.jena.sparql.core.Quad
 
 import java.io.{File, PrintWriter}
@@ -11,18 +10,7 @@ import scala.jdk.CollectionConverters._
 
 class TSVStreamRDF(file: File, prefixes: Map[String, String], oboPrefixes: Boolean) extends StreamRDF {
 
-  private val prefixMapping: PrefixMapping = {
-    val pm = new PrefixMappingImpl() {
-      override def shortForm(uri: String): String = {
-        val shortForm = super.shortForm(uri)
-        if (oboPrefixes && (shortForm == uri) && (uri.startsWith("http://purl.obolibrary.org/obo/"))) {
-          val tail = uri.replace("http://purl.obolibrary.org/obo/", "")
-          tail.split("_", 2).mkString(":")
-        } else shortForm
-      }
-    }
-    pm.setNsPrefixes(prefixes.asJava).withDefaultMappings(PrefixMapping.Standard)
-  }
+  private val prefixMapping = LongestFirstPrefixMapping(PrefixMapping.Standard.getNsPrefixMap.asScala.toMap ++ prefixes, oboPrefixes)
 
   private var writer: PrintWriter = _
 
@@ -31,17 +19,17 @@ class TSVStreamRDF(file: File, prefixes: Map[String, String], oboPrefixes: Boole
   }
 
   override def triple(triple: Triple): Unit = {
-    val s = triple.getSubject.toString(prefixMapping, true)
-    val p = triple.getPredicate.toString(prefixMapping, true)
-    val o = triple.getObject.toString(prefixMapping, true)
+    val s = prefixMapping.compact(triple.getSubject.toString)
+    val p = prefixMapping.compact(triple.getPredicate.toString)
+    val o = prefixMapping.compact(triple.getObject.toString)
     writer.println(s"$s\t$p\t$o")
   }
 
   override def quad(quad: Quad): Unit = {
-    val s = quad.getSubject.toString(prefixMapping, true)
-    val p = quad.getPredicate.toString(prefixMapping, true)
-    val o = quad.getObject.toString(prefixMapping, true)
-    val g = quad.getGraph.toString(prefixMapping, true)
+    val s = prefixMapping.compact(quad.getSubject.toString)
+    val p = prefixMapping.compact(quad.getPredicate.toString)
+    val o = prefixMapping.compact(quad.getObject.toString)
+    val g = prefixMapping.compact(quad.getGraph.toString)
     writer.println(s"$s\t$p\t$o\t$g")
   }
 
