@@ -46,7 +46,7 @@ lazy val core = project
       "dev.zio" %% "zio" % zioVersion,
       "dev.zio" %% "zio-streams" % zioVersion,
       "org.geneontology" %% "whelk-owlapi" % "1.1.2",
-      "org.apache.jena" % "apache-jena-libs" % "4.8.0" exclude("org.slf4j", "slf4j-log4j12"),
+      "org.apache.jena" % "apache-jena-libs" % "4.10.0" exclude("org.slf4j", "slf4j-log4j12"),
       "com.typesafe.scala-logging" %% "scala-logging" % "3.9.5",
       "dev.zio" %% "zio-test" % zioVersion % Test,
       "dev.zio" %% "zio-test-sbt" % zioVersion % Test
