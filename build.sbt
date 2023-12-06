@@ -1,9 +1,10 @@
 lazy val zioVersion = "2.0.19"
+lazy val scribeVersion = "3.12.2"
 lazy val gitCommitString = SettingKey[String]("gitCommit")
 
 lazy val commonSettings = Seq(
   organization := "org.geneontology",
-  version := "2.3.1",
+  version := "2.3.2",
   licenses := Seq("MIT license" -> url("https://opensource.org/licenses/MIT")),
   homepage := Some(url("https://github.com/balhoff/relation-graph")),
   scalaVersion := "2.13.12",
@@ -49,7 +50,8 @@ lazy val core = project
       "org.apache.jena" % "apache-jena-libs" % "4.10.0" exclude("org.slf4j", "slf4j-log4j12"),
       "com.typesafe.scala-logging" %% "scala-logging" % "3.9.5",
       "dev.zio" %% "zio-test" % zioVersion % Test,
-      "dev.zio" %% "zio-test-sbt" % zioVersion % Test
+      "dev.zio" %% "zio-test-sbt" % zioVersion % Test,
+      "com.outr" %% "scribe-slf4j" % scribeVersion % Test
     )
   )
   .settings(publishSettings)
@@ -66,7 +68,7 @@ lazy val cli = project
     executableScriptName := "relation-graph",
     publish / skip := true,
     libraryDependencies ++= Seq(
-      "com.outr" %% "scribe-slf4j" % "3.12.2",
+      "com.outr" %% "scribe-slf4j" % scribeVersion,
       "com.github.alexarchambault" %% "case-app" % "2.0.6",
       "io.circe" %% "circe-yaml" % "0.14.2",
     ),
