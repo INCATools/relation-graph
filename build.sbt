@@ -7,7 +7,7 @@ lazy val commonSettings = Seq(
   version := "2.3.2",
   licenses := Seq("MIT license" -> url("https://opensource.org/licenses/MIT")),
   homepage := Some(url("https://github.com/balhoff/relation-graph")),
-  scalaVersion := "2.13.12",
+  scalaVersion := "2.13.14",
   scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8"),
   javaOptions += "-Xmx8G"
 )
