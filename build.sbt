@@ -1,4 +1,4 @@
-lazy val zioVersion = "2.0.22"
+lazy val zioVersion = "2.1.13"
 lazy val scribeVersion = "3.15.0"
 lazy val gitCommitString = SettingKey[String]("gitCommit")
 
