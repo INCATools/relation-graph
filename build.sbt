@@ -1,5 +1,5 @@
 lazy val zioVersion = "2.0.22"
-lazy val scribeVersion = "3.15.0"
+lazy val scribeVersion = "3.15.3"
 lazy val gitCommitString = SettingKey[String]("gitCommit")
 
 lazy val commonSettings = Seq(
@@ -46,7 +46,7 @@ lazy val core = project
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zioVersion,
       "dev.zio" %% "zio-streams" % zioVersion,
-      "org.geneontology" %% "whelk-owlapi" % "1.1.3",
+      "org.geneontology" %% "whelk-owlapi" % "1.2.1",
       "org.apache.jena" % "apache-jena-libs" % "5.4.0" exclude("org.slf4j", "slf4j-log4j12"),
       "com.typesafe.scala-logging" %% "scala-logging" % "3.9.5",
       "dev.zio" %% "zio-test" % zioVersion % Test,
