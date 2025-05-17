@@ -1,5 +1,5 @@
 lazy val zioVersion = "2.1.18"
-lazy val scribeVersion = "3.15.0"
+lazy val scribeVersion = "3.15.3"
 lazy val gitCommitString = SettingKey[String]("gitCommit")
 
 lazy val commonSettings = Seq(
@@ -7,7 +7,7 @@ lazy val commonSettings = Seq(
   version := "2.3.2",
   licenses := Seq("MIT license" -> url("https://opensource.org/licenses/MIT")),
   homepage := Some(url("https://github.com/balhoff/relation-graph")),
-  scalaVersion := "2.13.15",
+  scalaVersion := "2.13.16",
   scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8"),
   javaOptions += "-Xmx8G"
 )
@@ -46,7 +46,7 @@ lazy val core = project
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zioVersion,
       "dev.zio" %% "zio-streams" % zioVersion,
-      "org.geneontology" %% "whelk-owlapi" % "1.1.3",
+      "org.geneontology" %% "whelk-owlapi" % "1.2.1",
       "org.apache.jena" % "apache-jena-libs" % "4.10.0" exclude("org.slf4j", "slf4j-log4j12"),
       "com.typesafe.scala-logging" %% "scala-logging" % "3.9.5",
       "dev.zio" %% "zio-test" % zioVersion % Test,
