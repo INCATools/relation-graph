@@ -1,4 +1,4 @@
-lazy val zioVersion = "2.1.18"
+lazy val zioVersion = "2.1.22"
 lazy val scribeVersion = "3.17.0"
 lazy val gitCommitString = SettingKey[String]("gitCommit")
 
@@ -7,7 +7,7 @@ lazy val commonSettings = Seq(
   version := "2.3.3",
   licenses := Seq("MIT license" -> url("https://opensource.org/licenses/MIT")),
   homepage := Some(url("https://github.com/balhoff/relation-graph")),
-  scalaVersion := "2.13.16",
+  scalaVersion := "2.13.17",
   scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8"),
   javaOptions += "-Xmx8G"
 )
@@ -69,7 +69,7 @@ lazy val cli = project
     publish / skip := true,
     libraryDependencies ++= Seq(
       "com.outr" %% "scribe-slf4j" % scribeVersion,
-      "com.github.alexarchambault" %% "case-app" % "2.0.6",
+      "com.github.alexarchambault" %% "case-app" % "2.1.0",
       "io.circe" %% "circe-yaml" % "0.14.2",
     ),
     gitCommitString := git.gitHeadCommit.value.getOrElse("Not Set"),
