@@ -71,7 +71,7 @@ lazy val cli = project
     publish / skip := true,
     libraryDependencies ++= Seq(
       "com.outr" %% "scribe-slf4j2" % scribeVersion,
-      "com.github.alexarchambault" %% "case-app" % "2.1.0",
+      "com.github.alexarchambault" %% "case-app" % "2.1.1",
       "io.circe" %% "circe-yaml" % "0.14.2",
     ),
     gitCommitString := git.gitHeadCommit.value.getOrElse("Not Set"),
