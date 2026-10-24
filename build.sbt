@@ -4,7 +4,7 @@ lazy val gitCommitString = SettingKey[String]("gitCommit")
 
 lazy val commonSettings = Seq(
   organization := "org.geneontology",
-  version := "2.3.4",
+  version := "3.0.0",
   licenses := Seq("MIT license" -> url("https://opensource.org/licenses/MIT")),
   homepage := Some(url("https://github.com/balhoff/relation-graph")),
   scalaVersion := "2.13.17",
@@ -15,10 +15,12 @@ lazy val commonSettings = Seq(
 lazy val publishSettings = Seq(
   Test / publishArtifact := false,
   publishMavenStyle := true,
+  // sbt-git's GitVersioning (enabled for cli) otherwise derives isSnapshot from git state for the whole build
+  isSnapshot := version.value.endsWith("-SNAPSHOT"),
   publishTo := {
-    val nexus = "https://oss.sonatype.org/"
-    if (isSnapshot.value) Some("snapshots" at nexus + "content/repositories/snapshots")
-    else Some("releases" at nexus + "service/local/staging/deploy/maven2")
+    val centralSnapshots = "https://central.sonatype.com/repository/maven-snapshots/"
+    if (isSnapshot.value) Some("central-snapshots" at centralSnapshots)
+    else localStaging.value
   },
   pomExtra :=
     <developers>
@@ -46,12 +48,12 @@ lazy val core = project
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zioVersion,
       "dev.zio" %% "zio-streams" % zioVersion,
-      "org.geneontology" %% "whelk-owlapi" % "1.2.1",
+      "org.geneontology" %% "whelk-owlapi" % "2.0.0",
       "org.apache.jena" % "apache-jena-libs" % "4.10.0" exclude("org.slf4j", "slf4j-log4j12"),
       "com.typesafe.scala-logging" %% "scala-logging" % "3.9.6",
       "dev.zio" %% "zio-test" % zioVersion % Test,
       "dev.zio" %% "zio-test-sbt" % zioVersion % Test,
-      "com.outr" %% "scribe-slf4j" % scribeVersion % Test
+      "com.outr" %% "scribe-slf4j2" % scribeVersion % Test
     )
   )
   .settings(publishSettings)
@@ -68,7 +70,7 @@ lazy val cli = project
     executableScriptName := "relation-graph",
     publish / skip := true,
     libraryDependencies ++= Seq(
-      "com.outr" %% "scribe-slf4j" % scribeVersion,
+      "com.outr" %% "scribe-slf4j2" % scribeVersion,
       "com.github.alexarchambault" %% "case-app" % "2.1.0",
       "io.circe" %% "circe-yaml" % "0.14.2",
     ),
